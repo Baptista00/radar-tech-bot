@@ -3,3 +3,10 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.vscode/
+data/*.db
+data/*.db-*
+data/*.lock
+data/.test-*/
+data/*.log
+data/*.pid
