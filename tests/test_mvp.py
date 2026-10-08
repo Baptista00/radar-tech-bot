@@ -143,7 +143,7 @@ class ProviderAndScoreTests(IsolatedTest):
     def test_provider_http_errors_are_safe_and_no_fallback(self):
         response = Mock(status_code=403)
         response.json.return_value = {"message": "do-not-echo-private-value"}
-        with patch("services.mercado_livre.requests.get", return_value=response) as request:
+        with patch("services.mercado_livre.requests.Session.get", return_value=response) as request:
             with self.assertRaises(SafeError) as caught:
                 MercadoLivreSource("test-only-placeholder").search("mouse", 20)
         self.assertEqual(caught.exception.status, 403)
@@ -154,7 +154,7 @@ class ProviderAndScoreTests(IsolatedTest):
     def test_provider_success_ignores_bad_items(self):
         response = Mock(status_code=200)
         response.json.return_value = {"results": [self.item(), self.item(price=None)]}
-        with patch("services.mercado_livre.requests.get", return_value=response):
+        with patch("services.mercado_livre.requests.Session.get", return_value=response):
             result = MercadoLivreSource("test-only-placeholder").search("mouse", 20)
         self.assertEqual(len(result), 1)
 

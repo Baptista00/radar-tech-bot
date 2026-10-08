@@ -11,6 +11,7 @@ import requests
 
 from models import Product
 from safety import SafeError, clean_text
+from services.mercado_livre_http import API_TIMEOUT, create_meli_session
 
 API_SEARCH = "https://api.mercadolibre.com/sites/MLB/search"
 PRODUCT_HOSTS = {"produto.mercadolivre.com.br", "www.mercadolivre.com.br", "mercadolivre.com.br"}
@@ -132,11 +133,12 @@ class MercadoLivreSource:
         if not self._access_token:
             raise SafeError("Mercado Livre: acesso pendente. Configure um access token autorizado para a API pública de busca.")
         try:
-            response = requests.get(
-                API_SEARCH, params={"q": term, "limit": min(max(limit, 1), 50), "condition": "new"},
-                headers={"Authorization": f"Bearer {self._access_token}"},
-                timeout=(5, 20), allow_redirects=False,
-            )
+            with create_meli_session() as session:
+                response = session.get(
+                    API_SEARCH, params={"q": term, "limit": min(max(limit, 1), 50), "condition": "new"},
+                    headers={"Authorization": f"Bearer {self._access_token}"},
+                    timeout=API_TIMEOUT, allow_redirects=False,
+                )
         except requests.RequestException:
             raise SafeError("Mercado Livre: falha de conexão ou timeout.") from None
         code = response.status_code

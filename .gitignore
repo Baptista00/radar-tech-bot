@@ -10,3 +10,4 @@ data/*.lock
 data/.test-*/
 data/*.log
 data/*.pid
+data/meli_oauth/
