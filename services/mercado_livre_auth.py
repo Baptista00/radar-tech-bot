@@ -334,6 +334,45 @@ def _verify_command() -> int:
     return 0 if result.authenticated else 1
 
 
+def _diagnose_command() -> int:
+    from services.mercado_livre_diagnose import diagnose, format_report
+    previous_logging = logging.root.manager.disable
+    previous_http_debug = http.client.HTTPConnection.debuglevel
+    previous_https_debug = http.client.HTTPSConnection.debuglevel
+    report = None
+    try:
+        # Inclui carregamento/renovação OAuth: bibliotecas nunca imprimem headers.
+        logging.disable(logging.CRITICAL)
+        http.client.HTTPConnection.debuglevel = 0
+        http.client.HTTPSConnection.debuglevel = 0
+        config = load_oauth_config()
+        token = get_valid_access_token()
+        protected = [os.environ.get(key, "") for key in (
+            "TELEGRAM_BOT_TOKEN", "TELEGRAM_ADMIN_ID", "MELI_CLIENT_SECRET",
+            "MELI_ACCESS_TOKEN", "MELI_REFRESH_TOKEN",
+        )]
+        # Somente leitura do cofre já usado pelo OAuth; valores servem só à redação.
+        store = LocalOAuthStore()
+        with store.locked():
+            tokens = store.load().get("tokens", {})
+            if isinstance(tokens, dict):
+                protected.extend(tokens.get(key, "") for key in ("access_token", "refresh_token"))
+        report = diagnose(config, token, protected=protected)
+    except Exception:
+        # Nunca exibir exceções que possam conter requisições/credenciais.
+        pass
+    finally:
+        logging.disable(previous_logging)
+        http.client.HTTPConnection.debuglevel = previous_http_debug
+        http.client.HTTPSConnection.debuglevel = previous_https_debug
+    if report is None:
+        print("AUTO_PUBLISH=false\nTelegram: 0 mensagens\nClassificação: G) INCONCLUSIVO\n"
+              "Diagnóstico não concluído. Falha ao preparar OAuth/cofre ou processar resposta; detalhes sensíveis omitidos.")
+        return 1
+    print(format_report(report))
+    return 0 if report["item"].get("success") is True else 1
+
+
 class _SafeParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         # argparse normalmente inclui o argumento recebido, que pode conter code/state.
@@ -351,17 +390,20 @@ def _callback_from_prompt() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _SafeParser(description="OAuth Mercado Livre: authorize, exchange, refresh e verify, sem exibir tokens.")
+    parser = _SafeParser(description="OAuth Mercado Livre: authorize, exchange, refresh, verify e diagnose, sem exibir tokens.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("authorize", help="gera somente a URL oficial com PKCE e state")
     exchange = commands.add_parser("exchange", help="finaliza a autorizacao usando a callback")
     exchange.add_argument("--callback-url", help="callback completa; omita para entrada oculta recomendada")
     commands.add_parser("refresh", help="garante token valido, renovando somente se necessario")
     commands.add_parser("verify", help="consulta /users/me; exibe somente status HTTP e confirmacao de autenticacao")
+    commands.add_parser("diagnose", help="diagnostica conta, aplicação, grant e HTTP 403 de items; sem Telegram")
     try:
         args = parser.parse_args(argv)
         if args.command == "verify":
             return _verify_command()
+        if args.command == "diagnose":
+            return _diagnose_command()
         config = load_oauth_config()
         configure_logging((config.client_secret,))
         auth = MercadoLivreAuth(config)

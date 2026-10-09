@@ -22,7 +22,7 @@ from main import poll_admin, run
 from models import Product
 from runtime_lock import instance_lock
 from safety import SafeError, SecretFilter
-from services.mercado_livre import MercadoLivreSource, normalize_item
+from services.mercado_livre import CatalogSource as MercadoLivreSource, SearchBatch, normalize_item
 from services.offer_filter import score_offer
 from services.offer_formatter import format_offer
 from telegram_service import TelegramService
@@ -49,7 +49,8 @@ def test_directory():
 def product(**changes):
     values = dict(external_id="MLB100", title="Mouse de teste", price=10000,
                   original_price=20000, url="https://produto.mercadolivre.com.br/MLB-100-teste",
-                  category="mouse", search_term="mouse")
+                  category="mouse", search_term="mouse", brand="Logitech", sold_quantity=1000,
+                  free_shipping=True, seller_reputation="GREEN")
     values.update(changes)
     return Product(**values)
 
@@ -65,6 +66,9 @@ class IsolatedTest(unittest.TestCase):
         self.dotenv = patch("config.load_dotenv", side_effect=AssertionError(".env proibido nos testes"))
         self.network.start()
         self.dotenv.start()
+        self.oauth_dotenv = patch("services.mercado_livre_auth.load_dotenv", side_effect=AssertionError(".env proibido nos testes"))
+        self.oauth_dotenv.start()
+        self.addCleanup(self.oauth_dotenv.stop)
         self.addCleanup(self.network.stop)
         self.addCleanup(self.dotenv.stop)
 
@@ -137,29 +141,35 @@ class ProviderAndScoreTests(IsolatedTest):
         self.assertIsNone(p.sold_quantity)
 
     def test_public_api_requires_explicit_access(self):
-        with self.assertRaises(SafeError):
-            MercadoLivreSource().search("mouse", 20)
+        with patch("services.mercado_livre.get_valid_access_token", side_effect=SafeError("OAuth: autorização necessária.")):
+            batch = MercadoLivreSource().search("mouse", 10)
+        self.assertTrue(batch.stop)
+        self.assertEqual(len(batch.errors), 1)
+        self.assertEqual(batch.products, [])
 
     def test_provider_http_errors_are_safe_and_no_fallback(self):
         response = Mock(status_code=403)
         response.json.return_value = {"message": "do-not-echo-private-value"}
-        with patch("services.mercado_livre.requests.Session.get", return_value=response) as request:
-            with self.assertRaises(SafeError) as caught:
-                MercadoLivreSource("test-only-placeholder").search("mouse", 20)
-        self.assertEqual(caught.exception.status, 403)
-        self.assertNotIn("do-not-echo", str(caught.exception))
+        with patch("services.mercado_livre.requests.Session.get", return_value=response) as request, \
+             patch("services.mercado_livre.get_valid_access_token", return_value="test-only-placeholder"):
+            batch = MercadoLivreSource().search("mouse", 10)
+        self.assertEqual(batch.errors[0].status, 403)
+        self.assertNotIn("do-not-echo", str(batch.errors[0]))
+        response.json.assert_not_called()
         self.assertEqual(request.call_count, 1)
         self.assertFalse(request.call_args.kwargs["allow_redirects"])
 
     def test_provider_success_ignores_bad_items(self):
         response = Mock(status_code=200)
-        response.json.return_value = {"results": [self.item(), self.item(price=None)]}
-        with patch("services.mercado_livre.requests.Session.get", return_value=response):
-            result = MercadoLivreSource("test-only-placeholder").search("mouse", 20)
-        self.assertEqual(len(result), 1)
+        response.json.return_value = {"results": [None, {"id": "MLA123"}, {"id": "untrusted/id"}]}
+        with patch("services.mercado_livre.requests.Session.get", return_value=response) as request, \
+             patch("services.mercado_livre.get_valid_access_token", return_value="test-only-placeholder"):
+            batch = MercadoLivreSource().search("mouse", 10)
+        self.assertEqual(batch.products, [])
+        request.assert_called_once()
 
     def test_score_missing_fields_are_not_fabricated(self):
-        p = product(original_price=None, brand=None)
+        p = product(original_price=None, brand=None, sold_quantity=None, free_shipping=None, seller_reputation=None)
         result = score_offer(p, [])
         self.assertEqual(result.score, 0)
         self.assertFalse(result.approved(0))
@@ -170,14 +180,15 @@ class ProviderAndScoreTests(IsolatedTest):
 
     def test_history_and_discount_control_approval(self):
         p = product(original_price=None)
-        self.assertTrue(score_offer(p, [15000, 14000]).approved(70))
+        self.assertNotIn("history", score_offer(p, [15000, 14000]).criteria)
+        self.assertTrue(score_offer(p, [15000, 14000, 15000]).approved(60))
         self.assertFalse(score_offer(p, [9000]).approved(70))
         self.assertTrue(score_offer(product(), []).approved(70))
         self.assertFalse(score_offer(product(original_price=10100), []).approved(70))
 
     def test_formatter_omits_unavailable_fields(self):
         p = product(original_price=None, rating=None)
-        text = format_offer(p, score_offer(p, [15000]))
+        text = format_offer(p, score_offer(p, [15000, 15000, 15000]))
         self.assertNotIn("OFF", text)
         self.assertNotIn("Avaliação", text)
         self.assertIn("R$ 100,00", text)
@@ -288,14 +299,15 @@ class DatabaseTests(DatabaseBase):
 class EngineAndAdminTests(DatabaseBase):
     def make_engine(self, *, auto_publish=False, source=None):
         cfg = replace(self.config, auto_publish=auto_publish, search_terms=("mouse",), request_interval_seconds=0)
-        source = source or Mock(search=Mock(return_value=[product()]))
+        source = source or Mock(search=Mock(return_value=SearchBatch(products=[product()], found_ids={"MLB100"})))
         telegram = Mock(spec=TelegramService)
         telegram.publish_offer.return_value = 500
         engine = OfferEngine(cfg, self.db, source, telegram, clock=lambda: NOW)
         return engine, telegram
 
     def test_simulation_pipeline_saves_all_without_posting(self):
-        source = Mock(search=Mock(return_value=[product(), product(), product(external_id="MLB200", original_price=None)]))
+        source = Mock(search=Mock(return_value=SearchBatch(
+            products=[product(), product(), product(external_id="MLB200", original_price=None)], found_ids={"MLB100", "MLB200"})))
         engine, telegram = self.make_engine(source=source)
         engine.run_search()
         telegram.publish_offer.assert_not_called()

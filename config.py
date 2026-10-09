@@ -1,19 +1,28 @@
 """Configuração sem efeitos no import; o .env só é carregado ao iniciar o app."""
 
+import math
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
+from services.offer_relevance import DEFAULT_NEGATIVE_KEYWORDS
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_TERMS = (
-    "mouse", "teclado", "headset", "mousepad", "monitor", "notebook", "SSD",
-    "memória RAM", "placa de vídeo", "processador", "controle gamer",
-    "microfone", "webcam", "carregador", "hub USB", "power bank",
-    "acessórios para setup", "gadgets tech",
+    "mouse gamer", "headset gamer", "ssd nvme",
+)
+SUGGESTED_TERMS = (
+    "teclado mecânico", "mousepad", "monitor gamer", "notebook",
+    "memória ram ddr4", "memória ram ddr5", "placa de vídeo", "processador",
+    "microfone usb", "webcam", "controle xbox", "power bank", "hub usb", "carregador usb c",
+)
+DEFAULT_KNOWN_BRANDS = (
+    "Logitech", "HyperX", "Kingston", "Samsung", "Crucial", "Corsair", "Razer",
+    "Redragon", "Lenovo", "Acer", "Asus", "Dell", "LG", "AMD", "Intel", "Nvidia",
 )
 
 
@@ -35,12 +44,15 @@ class Config:
     search_interval_minutes: int = 60
     search_terms: tuple[str, ...] = DEFAULT_TERMS
     search_terms_per_cycle: int = 3
-    search_limit_per_term: int = 20
+    search_limit_per_term: int = 10
+    known_brands: tuple[str, ...] = DEFAULT_KNOWN_BRANDS
     request_interval_seconds: int = 2
+    meli_request_delay_seconds: float = 1.0
+    meli_item_ids: tuple[str, ...] = ()
+    negative_keywords: tuple[str, ...] = DEFAULT_NEGATIVE_KEYWORDS
     history_days: int = 30
     post_timezone: str = "America/Sao_Paulo"
     database_path: Path = BASE_DIR / "data" / "radartech.db"
-    mercado_livre_access_token: str = field(default="", repr=False)
 
 
 def _integer(env: Mapping[str, str], name: str, default: int,
@@ -52,6 +64,23 @@ def _integer(env: Mapping[str, str], name: str, default: int,
     if not minimum <= value <= maximum:
         raise ConfigError(f"{name} precisa ficar entre {minimum} e {maximum}.")
     return value
+
+
+def _request_delay(env: Mapping[str, str]) -> float:
+    try:
+        value = float(env.get("MELI_REQUEST_DELAY_SECONDS", "1.0"))
+    except (TypeError, ValueError):
+        raise ConfigError("MELI_REQUEST_DELAY_SECONDS precisa ser um número.") from None
+    if not math.isfinite(value) or not 1 <= value <= 60:
+        raise ConfigError("MELI_REQUEST_DELAY_SECONDS precisa ficar entre 1 e 60 segundos.")
+    return value
+
+
+def parse_item_ids(value: str) -> tuple[str, ...]:
+    identities = tuple(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
+    if len(identities) > 50 or any(not re.fullmatch(r"MLB[0-9]{1,20}", identity) for identity in identities):
+        raise ConfigError("MELI_ITEM_IDS exige até 50 IDs MLB válidos, separados por vírgulas.")
+    return identities
 
 
 def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool = False) -> Config:
@@ -83,6 +112,12 @@ def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool
     terms = tuple(dict.fromkeys(t.strip() for t in raw_terms.split(",") if t.strip()))
     if not terms or len(terms) > 50 or any(len(term) > 80 for term in terms):
         raise ConfigError("SEARCH_TERMS exige de 1 a 50 termos de até 80 caracteres.")
+    brands = tuple(dict.fromkeys(b.strip() for b in environ.get("KNOWN_BRANDS", ",".join(DEFAULT_KNOWN_BRANDS)).split(",") if b.strip()))
+    if len(brands) > 100 or any(len(brand) > 80 for brand in brands):
+        raise ConfigError("KNOWN_BRANDS aceita até 100 marcas de até 80 caracteres.")
+    negatives = tuple(dict.fromkeys(word.strip() for word in environ.get("NEGATIVE_KEYWORDS", ",".join(DEFAULT_NEGATIVE_KEYWORDS)).split(",") if word.strip()))
+    if len(negatives) > 100 or any(len(word) > 80 for word in negatives):
+        raise ConfigError("NEGATIVE_KEYWORDS aceita até 100 expressões de até 80 caracteres.")
     return Config(
         telegram_bot_token=token, telegram_chat_id=chat_id,
         telegram_admin_id=admin_id, auto_publish=mode == "true",
@@ -93,10 +128,14 @@ def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool
         significant_price_drop_percent=_integer(environ, "SIGNIFICANT_PRICE_DROP_PERCENT", 10, 1, 90),
         search_interval_minutes=_integer(environ, "SEARCH_INTERVAL_MINUTES", 60, 5, 1440),
         search_terms=terms,
-        search_terms_per_cycle=_integer(environ, "SEARCH_TERMS_PER_CYCLE", 3, 1, 10),
-        search_limit_per_term=_integer(environ, "SEARCH_LIMIT_PER_TERM", 20, 1, 50),
+        # Limites desta etapa também protegem configurações antigas do ambiente.
+        search_terms_per_cycle=min(3, _integer(environ, "SEARCH_TERMS_PER_CYCLE", 3, 1, 10)),
+        search_limit_per_term=min(10, _integer(environ, "SEARCH_LIMIT_PER_TERM", 10, 1, 50)),
+        known_brands=brands,
         request_interval_seconds=_integer(environ, "REQUEST_INTERVAL_SECONDS", 2, 1, 60),
+        meli_request_delay_seconds=_request_delay(environ),
+        meli_item_ids=parse_item_ids(environ.get("MELI_ITEM_IDS", "")),
+        negative_keywords=negatives,
         history_days=_integer(environ, "HISTORY_DAYS", 30, 1, 365),
         post_timezone=timezone_name,
-        mercado_livre_access_token=environ.get("MERCADO_LIVRE_ACCESS_TOKEN", "").strip(),
     )

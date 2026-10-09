@@ -51,25 +51,59 @@ Até configurar o ID, apenas `/whoami` fica disponível. Os demais comandos resp
 | `/stats` | Observações analisadas, produtos únicos, total publicado, média de score e termos mais publicados. |
 | `/pause` | Bloqueia novas publicações e simulações; coleta e histórico continuam. Um envio já em andamento pode concluir. |
 | `/resume` | Retoma o modo configurado. Não altera `AUTO_PUBLISH`. |
-| `/buscar` | Coloca uma busca imediata na fila; recusa duplicar uma busca já em andamento. |
+| `/buscar` | Enfileira consulta e envia resumo privado ao concluir; recusa execução duplicada. |
 
 O painel usa long polling e exige que este processo permaneça aberto. Com processo desligado, o bot não responde `/status`. Outro processo de polling ou um webhook existente pode causar HTTP 409; o app informa o conflito e não remove webhooks automaticamente.
 
-## Mercado Livre: situação desta etapa
+## Consulta de anúncios em modo seguro
 
-**Busca real ainda depende de acesso adicional e não foi validada contra a sua aplicação.** O adaptador usa apenas o recurso oficial de busca do site MLB, com uma página de resultados por termo. Não há fallback para scraping nem dados fictícios em produção.
+**Consulta por IDs de anúncios implementada; descoberta global por palavra-chave ainda pendente.** A documentação oficial consultada em 08/10/2026 não confirmou uma busca global atual de anúncios de terceiros por `q` para esta aplicação. A tabela de [Itens e buscas](https://developers.mercadolivre.com.br/pt_br/itens-e-buscas) trata de buscas por vendedor e da migração para bulk. Anúncios da própria conta não substituem descoberta do marketplace. Falta confirmar um recurso oficial habilitado e documentado para essa finalidade; ausência de documentação não prova que todo acesso seja impossível. Não foi inventado endpoint substituto nem implementado scraping.
 
-A aplicação no DevCenter já foi criada. O módulo OAuth abaixo permite autorizar sua própria conta e renovar tokens, mas **a conexão entre esse cofre e o buscador fica para a próxima etapa**. O adaptador atual ainda usa a opção legada `MERCADO_LIVRE_ACCESS_TOKEN`; não copie tokens novos para essa variável. A função `get_valid_access_token()` será o ponto de integração, evitando tokens fixos. **Ter um token não garante que a plataforma libere a busca de anúncios de terceiros**; a permissão para o recurso e uso pretendidos precisa ser confirmada com o Mercado Livre.
+Entrada disponível: **item IDs reais de anúncios MLB**, sem exigir catálogo ou `buy_box_winner`. Não confundir ID do anúncio com ID de catálogo da página `/p/MLB...`. O termo filtra localmente essa lista; não executa busca global. Sem IDs, o comando encerra com erro explicativo e sem consultar a API, em vez de apresentar zero como sucesso.
 
-Sem esse acesso, a busca registra “acesso pendente”, guarda o erro e o painel continua disponível. HTTP 401, 403, 404 e 429 são tratados; o ciclo para após o erro e aguarda o próximo agendamento, sem insistir em páginas alternativas. Se a plataforma não autorizar a busca de terceiros, será necessário escolher outra fonte permitida implementando `ProductSource.search`.
+No **PowerShell normal do VS Code**, com outra instância encerrada, informe até cinco IDs públicos de anúncios relacionados a mouse gamer:
 
-Referências oficiais consultadas:
+```powershell
+$env:MELI_ITEM_IDS = Read-Host 'Informe ate 5 IDs reais de anuncios MLB, separados por virgulas'
+.\.venv\Scripts\python.exe main.py --dry-run --search-now --search-limit 5
+```
 
-- [Itens e buscas](https://developers.mercadolivre.com.br/en_us/public-and-private-resources/items-and-searches)
-- [Permissões funcionais](https://developers.mercadolivre.com.br/pt_br/permissoes-funcionais/)
-- [Telegram Bot API](https://core.telegram.org/bots/api)
+A primeira linha solicita somente IDs públicos, sem alterar `.env`, OAuth ou credenciais. Formato: `MLB` seguido dos dígitos do anúncio, sem hífen. Existe também `--item-ids` para passar a lista separada por vírgulas; tem prioridade sobre `MELI_ITEM_IDS`. Para `/buscar`, a lista precisa estar no ambiente do processo que inicia o bot ou ser configurada manualmente pelo usuário.
 
-São aceitos produtos novos e ativos em BRL, com preço válido, título relacionado a tech e link normal do Mercado Livre. Metadados ausentes não são completados por suposição. Avaliação do vendedor não vira avaliação do produto; `base_price` não vira preço antigo. URLs de produto perdem query string e fragmento, eliminando rastreamento e parâmetros de afiliado. A primeira fonte cobre itens reconhecidos por palavras do título; gadgets fora dessa lista podem ser descartados até calibrarmos o filtro.
+O comando executa um ciclo e encerra: **força `AUTO_PUBLISH=false`**, sem polling nem mensagens ao Telegram. Com `--search-limit 5`, consulta até cinco IDs únicos e filtra somente por `mouse gamer`, independentemente de configurações antigas. A opção aceita de 1 a 10 e exige `--search-now`. Sem ela, usa os três termos iniciais e até dez IDs da lista, com cache; não descobre trinta anúncios novos. `--dry-run --once` usa os termos configurados. O lock continua impedindo instâncias simultâneas.
+
+Pipeline:
+
+1. `GET /items/bulk?ids=...&attributes=body...`: detalhes oficiais com seleção de campos. Prioriza `id`, `status_code`, `body`; aceita `body.id` e o `code` legado na migração. ID somente na raiz é suficiente. Sucesso individual exige 200 ou 206 e detalhe válido, independentemente do HTTP global. Envelope incompatível, item ausente no lote ou campos essenciais faltantes permitem um único `GET /items/{item_id}` oficial por item no ciclo, na mesma sessão segura. O fallback não repete GETs nem usa scraping.
+2. Validar ID, site MLB, estado ativo, compra imediata, condição nova e permalink correspondente ao item.
+3. `GET /items/{item_id}/sale_price?context=channel_marketplace`: preço atual em `amount`, moeda e referência promocional em `regular_amount`. Segue a [API oficial de preços](https://developers.mercadolivre.com.br/devcenter/api-de-precos), sem depender dos preços de `/items`, anunciados para descontinuação. Nunca usa `base_price` como preço anterior.
+4. Relevância por termo/título/domínio e palavras negativas. Para mouse, exclui mousepad isolado, peças, adesivos, cabos e resultados sem relação identificável.
+5. `GET /products/{catalog_product_id}` somente quando falta marca ou imagem. Catálogo não troca preço, título, URL ou item pelo vencedor. `buy_box_winner=null` não elimina o anúncio. Recurso documentado em [Buscador de produtos](https://developers.mercadolivre.com.br/buscador-de-produtos).
+6. SQLite por item, histórico, Radar Score V2, avaliações e ranking.
+
+Com cinco IDs: até **um bulk, cinco fallbacks individuais, cinco preços e cinco enriquecimentos opcionais**, antes dos retries dos endpoints que os permitem. Preço e catálogo só são consultados após validação básica. Cache evita repetir consulta de item, preço ou catálogo no ciclo, inclusive fallback que falhou. Sem paralelismo, paginação, cookies, afiliados ou descoberta adicional. O adaptador antigo de catálogo fica apenas para regressão; não é a fonte do aplicativo.
+
+Dados restritos de terceiros (`sold_quantity`, estoque exato, reputação e estrelas) ficam `NULL` nesta fonte. Contagens públicas referenciais não viram quantidades exatas. Frete só entra quando a API informa booleano. Desconto exige `regular_amount > amount > 0`; referência promocional oficial não é observação do histórico local. Sem preço oficial ou permalink correto, há rejeição com motivo. Link mantém seleção do item quando necessária e remove afiliados/rastreamento. Não inventa URL.
+
+Saída: `RADAR TECH — DRY RUN`, termos, IDs de entrada, itens válidos/relevantes, scores acima do threshold e erros. A origem explica que os IDs foram fornecidos. **TODAS AS OFERTAS ELEGÍVEIS** inclui scores abaixo de 70, preço real, item ID, campos opcionais, aprovação e motivo da decisão. `TOP OFERTAS` mostra até dez. Diagnóstico dos primeiros dez registros: ID, endpoint, HTTP status, nomes/tipos de campos conhecidos e motivo. Nenhum JSON completo ou dado privado.
+
+Incompatibilidade do bulk registra ID esperado, chaves conhecidas na raiz, presença/tipo de `body`, `status_code`, `code` e HTTP global. Chaves livres são representadas por `<outras>` e status inválidos só mostram o tipo, nunca o valor. O diagnóstico distingue fallback, recuperação e rejeição; não inclui tokens, headers ou o JSON recebido.
+
+Cada preço válido é salvo, inclusive se relevância reprovar; só relevantes entram no ranking. Um item gera no máximo uma observação e avaliação no ciclo. `SERIA PUBLICADA` exige threshold, economia observada e antispam liberado. Dry-run grava somente `simulations`, nunca `publications`. Não promete menor preço dos últimos dias.
+
+`/buscar` usa o mesmo motor. Admin recebe confirmação inicial e resumo privado ao concluir; pedidos concorrentes não duplicam execução. Com `AUTO_PUBLISH=false`, nada é publicado no canal. A CLI acima não envia sequer respostas administrativas.
+
+## Transporte, limites e erros da fonte
+
+`get_valid_access_token()` fornece o token e renova quando necessário. Sessão com `trust_env=False`, `verify=True`, timeout 5/20 segundos e redirecionamentos bloqueados. Sem token na URL ou headers de autorização nos logs. Sucesso em `/users/me` não garante acesso a anúncios de terceiros.
+
+`MELI_REQUEST_DELAY_SECONDS=1.0`: pausa mínima entre resposta e próximo GET, configurável de 1 a 60 segundos. `REQUEST_INTERVAL_SECONDS=2` acrescenta pausa entre filtros. Chamadas sempre sequenciais.
+
+Até três tentativas por GET. HTTP 429 respeita `Retry-After` em segundos ou HTTP-date e backoff de 5/10 segundos com jitter positivo de até 25%; usa o maior prazo. Esperas canceláveis. Após a terceira falha, encerra ciclo, preserva resultados anteriores e grava no SQLite cooldown de pelo menos 60 segundos ou prazo maior do servidor. Nova CLI ou `/buscar` respeita esse prazo. Log inclui somente endpoint sem query, tentativa, prazo interpretado e headers públicos numéricos de lista permitida.
+
+401 permite uma renovação forçada por ciclo, dentro do orçamento de GETs; não multiplica retries nem repete POST OAuth automaticamente. A fonte de anúncios tenta novamente após 5xx, até três GETs com espera de 5/10 segundos; o fallback individual tem orçamento estrito de um GET, inclusive em 401/429/5xx. Falha global de acesso ao bulk, autenticação não recuperável, rate limit, serviço indisponível, TLS/timeout ou resposta bulk completamente inválida encerram com erro seguro. Recusas individuais do bulk e 403/404 de detalhe/preço rejeitam somente o item e permitem os demais. 403/404 em enriquecimento mantém oferta; 403 desativa novas consultas de catálogo no ciclo. Erro individual em bulk HTTP 200 usa `status_code` (ou `code` legado); 429 interno interrompe e impõe cooldown, sem loop de reconsulta. JSON/envelope incompatível não vira sucesso silencioso. Falha em `sale_price` nunca é preenchida com preço antigo de `/items`.
+
+Saída `0`: consulta concluída, mesmo sem aprovados. `1`: falha, fonte não configurada ou resultado parcial. 403 pode indicar falta de permissão para terceiros; sem fallback por scraping ou recurso privado. Acesso real a itens/preços precisa de validação manual fora da sessão restrita. **Descoberta global permanece pendente: ETAPA 2 ainda não cumpre integralmente o objetivo de encontrar anúncios automaticamente por termo.**
 
 ## Autorizar sua conta do Mercado Livre
 
@@ -115,7 +149,7 @@ Code verifier e state saem do cofre quando a callback é consumida. Tentativas v
 
 ### Renovação automática
 
-`services.mercado_livre_auth.get_valid_access_token()` devolve o token guardado enquanto válido e renova quando entra na margem de 60 segundos da expiração informada pelo provedor. Não há agendador separado: a renovação acontece na chamada da função. Para futura integração, chame-a antes de uma requisição autenticada e nunca imprima seu retorno. Há também `force_refresh=True` para tratar revogação antecipada após um 401, quando a fonte for integrada.
+`services.mercado_livre_auth.get_valid_access_token()` devolve o token guardado enquanto válido e renova quando entra na margem de 60 segundos da expiração informada pelo provedor. Não há agendador separado: a renovação acontece na chamada da função. A fonte de catálogo já a chama antes de uma requisição autenticada, sem imprimir o retorno. Há também `force_refresh=True` para tratar revogação antecipada após um 401, com limite de uma renovação forçada por ciclo da fonte.
 
 Para verificar a credencial ou renovar se necessário sem exibir seu valor:
 
@@ -153,6 +187,35 @@ Se o ambiente de execução do Codex impuser restrições de rede/proxy, execute
 
 Referências: [OAuth do Mercado Livre](https://developers.mercadolivre.com.br/autenticacao-e-autorizacao), [PKCE — RFC 7636](https://www.rfc-editor.org/rfc/rfc7636.html), [proteção DPAPI do Windows](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata).
 
+### Diagnóstico isolado de HTTP 403 em anúncios
+
+**Estado atual do checkpoint:** a validação manual confirmou OAuth válido, aplicação e conta ativas, grant correspondente e scopes `read`, `write` e `offline_access`. A consulta de item de terceiro continua retornando **HTTP 403 `access_denied`**. A causa específica ainda não foi comprovada; possível restrição ou política de acesso permanece pendente de investigação/suporte do Mercado Livre. Não alterar parser, score ou pipeline sem nova evidência. **Manter `AUTO_PUBLISH=false` até validação futura; nenhuma oferta real foi publicada.**
+
+No PowerShell normal do VS Code:
+
+```powershell
+.\.venv\Scripts\python.exe -m services.mercado_livre_auth diagnose
+```
+
+Este comando mantém publicação desativada no diagnóstico (`AUTO_PUBLISH=false`), não inicia o pipeline nem acessa Telegram, SQLite ou preços. Não altera `.env`, grants, permissões ou IPs. Usa a configuração e o cofre OAuth existentes; `get_valid_access_token()` pode renovar tokens antes da coleta, como já faz o helper. Não execute chamadas reais dentro de uma sessão Codex com rede restrita.
+
+Coleta documentada, somente por GET:
+
+1. `/users/me`: HTTP, presença de ID (sem mostrar o número), site e estados oficiais de validação, quando fornecidos.
+2. `/applications/{APP_ID}`: atividade, site, sandbox, certificação, bloqueio e scopes, somente quando retornados. Dados privados podem exigir token da conta que criou a aplicação. Campo ausente não vira `false`.
+3. `/applications/{APP_ID}/grants`: compara `user_id` e `app_id` internamente e mostra somente o grant correspondente, nomes de scopes e data/estado retornados. Se a primeira página não permitir localizar o grant, tenta uma vez o recurso oficial `/users/{USER_ID}/applications`. Falha de consulta ou página incompleta não prova grant ausente. Exibe presença de `read`, `offline_access` e `write`; falta de `write` não é tratada como impedimento de leitura.
+4. `/items/MLB7390921738`: exatamente um GET autenticado, sem projeção de campos. Em erro, preserva `error`, `code`, `message`, `blocked_by`, `path`, `cause`, `request_id` e os headers permitidos `x-request-id`, `retry-after`, `x-content-missing`. Sucesso 200/206 é confirmado sem exibir os dados do anúncio.
+5. O mesmo item: exatamente um GET sem credencial, em sessão nova, sem cookies herdados. Resultado é observação de diagnóstico; não muda o acesso em produção nem prova uma regra universal do marketplace.
+6. `/users/{USER_ID}/items/search?limit=1`: se houver anúncio próprio, consulta uma vez `/items/{OWN_ITEM_ID}` e compara os HTTPs. Não repete o GET se o item próprio já for o ID testado. Consulta recusada não é confundida com conta sem anúncios.
+
+Sem retries no diagnóstico, com um segundo entre GETs. HTTP 429 suspende as consultas restantes; não há tentativa de contornar o limite. TLS permanece validado, `trust_env=False`, timeout 5/20 segundos e redirecionamentos bloqueados. Segredos conhecidos e padrões de credenciais são ocultados inclusive dentro de mensagens/cause; chaves privadas são descartadas. Texto oficial seguro é preservado, sem paráfrase. Nenhum JSON completo de conta/aplicação/item, header de autorização ou cookie é impresso. O relatório fica apenas na saída do terminal; não é salvo no banco ou em arquivo pelo comando.
+
+A classificação A–G usa evidência explícita. `access_denied` genérico fica **G) INCONCLUSIVO**. Item próprio 200 e terceiro 403, isoladamente, não provam bloqueio geral a terceiros. `PolicyAgent` identifica **F) POLICYAGENT / POLÍTICA DO MERCADO LIVRE**, mas não revela qual política interna negou acesso. Com OAuth válido, aplicação ativa e grant correspondente com `read`, a orientação é suporte oficial com data UTC, endpoint, mensagem/code e request ID seguros, sem novas alterações no pipeline. Saída `0`: detalhe do item autenticado confirmado; `1`: acesso não confirmado ou coleta inconclusiva. Saída `0` não confirma que todos os outros endpoints estejam liberados.
+
+Conferências manuais indicadas no relatório: DevCenter > **Meus aplicativos** > aplicação > **Administrar permissões** para visualizar/exportar grants; edição da aplicação para unidades e permissões; menu da aplicação > **Gerenciar intervalos de IP**, caso essa opção esteja habilitada, somente para consulta. A documentação atual também exige separar aplicações Mercado Livre/Mercado Pago e orienta verificar scopes `urn:mp:`; sua presença é mostrada para investigação, sem atribuir automaticamente a causa do 403.
+
+Referências oficiais: [aplicações e grants](https://developers.mercadolivre.com.br/pt_br/produto-consulta-de-usuarios/gerencie-seu-aplicativo), [conta e estados](https://developers.mercadolivre.com.br/pt_br/consulta-de-usuarios), [causas de HTTP 403](https://developers.mercadolivre.com.br/pt_br/autenticacao-e-autorizacao/erro-403), [gestão de IPs](https://developers.mercadolivre.com.br/pt_br/tendencias/gerenciar-ips-de-um-aplicativo), [busca de itens próprios](https://developers.mercadolivre.com.br/pt_br/itens-e-buscas).
+
 ## Configuração e limites
 
 | Variável | Padrão | Uso |
@@ -167,11 +230,14 @@ Referências: [OAuth do Mercado Livre](https://developers.mercadolivre.com.br/au
 | `SEARCH_INTERVAL_MINUTES` | `60` | Intervalo depois do fim de cada ciclo. |
 | `SEARCH_TERMS` | lista tech do exemplo | Termos separados por vírgulas. |
 | `SEARCH_TERMS_PER_CYCLE` | `3` | Rodízio persistente dos termos; evita consultar tudo de uma vez. |
-| `SEARCH_LIMIT_PER_TERM` | `20` | Uma página, até 20 resultados por termo. |
-| `REQUEST_INTERVAL_SECONDS` | `2` | Pausa entre consultas da fonte. |
+| `SEARCH_LIMIT_PER_TERM` | `10` | Máximo de IDs configurados por ciclo; valores maiores são limitados a 10. |
+| `REQUEST_INTERVAL_SECONDS` | `2` | Pausa adicional entre termos. |
+| `MELI_REQUEST_DELAY_SECONDS` | `1.0` | Pausa entre a resposta e o próximo GET do Mercado Livre; de 1 a 60 segundos. |
+| `MELI_ITEM_IDS` | vazio | IDs públicos de anúncios MLB separados por vírgulas; sem descoberta global. |
+| `NEGATIVE_KEYWORDS` | lista do exemplo | Expressões negativas para filtro local. |
 | `HISTORY_DAYS` | `30` | Janela usada na comparação local de preços. |
+| `KNOWN_BRANDS` | lista do exemplo | Marcas reconhecidas, separadas por vírgulas; bônus pequeno de 5 pontos. |
 | `POST_TIMEZONE` | `America/Sao_Paulo` | Virada da cota diária e horários no painel. `tzdata` fornece o fuso no Windows. |
-| `MERCADO_LIVRE_ACCESS_TOKEN` | vazio | Acesso adicional à API oficial, quando autorizado. |
 | `MELI_CLIENT_ID` | placeholder no exemplo | Identificador da aplicação OAuth no DevCenter. |
 | `MELI_CLIENT_SECRET` | placeholder no exemplo | Segredo da aplicação; usado somente no corpo do POST OAuth. |
 | `MELI_REDIRECT_URI` | placeholder no exemplo | URL HTTPS fixa registrada no DevCenter. |
@@ -185,19 +251,20 @@ Publicações passam por uma reserva em transação SQLite antes do envio. Timeo
 
 ## Como o score funciona
 
-Score de 0 a 100: soma das notas vezes seus pesos, dividida pela soma dos pesos **disponíveis**, arredondada. Cada nota fica entre 0 e 1.
+Score de 0 a 100: **soma de pontos**, sem reescalar pelos campos disponíveis. Ausência de dados não aumenta artificialmente o score.
 
-| Critério | Peso | Nota |
+| Critério | Máximo | Pontos |
 | --- | --- | --- |
-| Desconto | 40 | Calculado só com preço atual e preço original válido; 50% ou mais recebe nota 1. |
-| Histórico | 35 | Queda contra o menor preço local anterior na janela; 20% ou mais recebe nota 1. O preço atual não entra na referência. |
-| Avaliação | 15 | Nota 3 ou menos recebe 0; nota 5 recebe 1. Só avaliação do produto recebida da fonte. |
-| Vendidos | 5 | Escala logarítmica de 0 a 1.000 unidades; ausente é ignorado. |
-| Marca | 5 | Marca informada nos atributos e presente na lista conhecida recebe 1; marca informada mas desconhecida recebe 0. |
+| Desconto | 35 | >=40%: 35; >=30%: 30; >=20%: 22; >=10%: 12; abaixo disso: 0. |
+| Histórico | 25 | Exige 3 observações anteriores do mesmo item. Queda contra menor valor: >=20%: 25; >=10%: 20; >=5%: 10. Preço atual fora da referência. |
+| Frete | 10 | `shipping.free_shipping=true`: 10; false: 0. |
+| Reputação | 10 | Apenas dado confiável: GREEN soma 10. Fonte atual de terceiros deixa desconhecido. |
+| Vendidos | 10 | Apenas contagem confiável: >=1.000: 10; >=500: 8; >=100: 6; >=50: 4; >=10: 2. Fonte atual de terceiros deixa desconhecido. |
+| Marca | 5 | Marca informada nos atributos e em `KNOWN_BRANDS`: 5; desconhecida: 0. |
 
-**Sem desconto positivo ou queda positiva no histórico, não há aprovação**, mesmo com boa marca/avaliação. Não há bônus por preço absoluto: comparar diretamente um carregador com um notebook distorceria o score. Recência é aplicada como trava de publicação. A fórmula é heurística inicial; score alto não é promessa de menor preço do mercado.
+Desconto usa exclusivamente `(original_price - price) / original_price * 100`, com duas casas decimais, quando ambos existem e o original é maior. Campos ausentes não são usados. Avaliação não pontua porque a fonte não fornece uma avaliação confiável do produto. **Sem desconto positivo ou queda positiva no histórico, não há aprovação**, mesmo alterando o threshold. Marca sozinha soma apenas 5 e não aprova. Relevância soma até 10; irrelevância impede aprovação. Título suspeito perde até 20; publicação recente perde 10; preço abaixo de 10% da referência histórica suficiente perde 25. Resultado limitado entre 0 e 100. Antispam continua como trava adicional. A fórmula é heurística inicial; score não promete menor preço de mercado.
 
-As linhas de desconto e avaliação são omitidas quando faltam dados. O texto de apoio usa apenas informação observada, sem inventar atributos ou alegar custo-benefício não verificado.
+Na fonte atual de terceiros, sem histórico suficiente ou dados confiáveis de reputação/vendas, máximo 60 (35 desconto + 10 frete + 5 marca + 10 relevância). Threshold 70 exige mais evidência; não foi reduzido automaticamente. É normal haver poucos ou nenhum aprovado com `MIN_OFFER_SCORE=70`; o relatório mantém visíveis todos os scores para avaliação. Não ajusta o threshold nem inventa dados para produzir aprovados. Campos ausentes são omitidos das prévias e nenhuma janela de “menor preço em X dias” é anunciada.
 
 ## Arquitetura e dados
 
@@ -211,7 +278,9 @@ telegram_service.py      Bot API, timeout, mensagens e proteção do modo seguro
 admin_bot.py             comandos privados e autorização pelo ID
 safety.py                erros seguros e filtro de logs
 runtime_lock.py          apenas uma instância local por banco
-services/mercado_livre.py adaptador substituível e normalização da fonte
+services/mercado_livre.py consulta por IDs, cache, transporte e rate limit
+services/mercado_livre_items.py anúncio, permalink e preço oficial
+services/offer_relevance.py relevância local e palavras negativas
 services/mercado_livre_auth.py OAuth PKCE, callback manual e renovação de tokens
 services/mercado_livre_http.py sessão HTTP própria, sem proxy herdado e com TLS validado
 services/meli_oauth_store.py cofre local protegido e gravação atômica
@@ -220,12 +289,19 @@ services/offer_formatter.py mensagem final
 tests/test_mvp.py         testes sem rede nem leitura de .env
 tests/test_mercado_livre_auth.py testes OAuth, erros, rotação e cofre com dados sintéticos
 tests/test_mercado_livre_http.py testes de isolamento de proxy e validação TLS, sem rede
+tests/test_mercado_livre_catalog.py regressão do adaptador anterior
+tests/test_mercado_livre_rate_limit.py retry, pausas, cooldown e cancelamento
+tests/test_mercado_livre_items.py anúncios, preços, score V2, cache, SQLite, CLI e painel
 data/radartech.db         banco local, criado no primeiro uso e ignorado pelo Git
 data/meli_oauth/          cofre OAuth local e lock; ignorados pelo Git
 teste_telegram.py        teste original preservado; envia mensagem real se executado
 ```
 
-Tabelas: `products`, `price_history`, `search_runs`, `offer_evaluations`, `publications`, `simulations`, `system_state` e `recent_errors`. Preços são **centavos inteiros**, datas no banco são UTC e campos não informados são `NULL`. Produtos são únicos por `(source, external_id)`; cada busca gera uma observação do preço e uma avaliação. Publicações confirmadas guardam o ID da mensagem. Termos mais publicados aparecem após pelo menos cinco publicações, para termos repetidos ao menos duas vezes.
+Tabelas: `products`, `price_history`, `search_runs`, `offer_evaluations`, `publications`, `simulations`, `system_state` e `recent_errors`. Preços são **centavos inteiros**, datas no banco são UTC e campos não informados são `NULL`. A migração aditiva para schema 3 acrescenta identidade separada de item/catálogo, categoria oficial e origem do preço, além das contagens de busca, preservando dados anteriores. Acontece quando o usuário iniciar o programa; a implementação não abre o banco real.
+
+Ofertas novas usam `external_id=item:<item_id>` e unicidade por item/fonte. `catalog_product_id` é separado e pode aparecer em vários anúncios. O `product_id` conceitual legado permanece nos registros antigos. Histórico antigo é preservado, sem transferir preços ao último vencedor: não sabemos qual item produziu cada preço anterior. Item novo começa histórico próprio. Duplicados no ciclo não criam observações extras; coleta em outro instante registra preço mesmo sem mudança. Simulações e publicações continuam separadas, com regra de 72 horas e exceção por queda significativa. Termos mais publicados exigem ao menos cinco publicações reais e duas por termo.
+
+O antispam também consulta registros legados que identificam o mesmo item. Publicação recente ou envio sem confirmação continua bloqueando a identidade nova. Preço legado de catálogo não abre exceção por queda, pois o vencedor anterior pode ter sido outro anúncio.
 
 O banco não guarda tokens. Logs usam o terminal, com início/fim de busca, contagens, prévias, publicações confirmadas e erros seguros. Respostas brutas de APIs e tracebacks de requests não são registrados. `.env`, `.vscode/`, `.venv/` e dados locais estão ignorados.
 
@@ -237,10 +313,12 @@ O banco não guarda tokens. Logs usam o terminal, com início/fim de busca, cont
 
 Testes usam SQLite e cofres temporários, dados sintéticos exclusivamente de teste e transportes simulados. Bloqueiam rede real e carregamento do `.env`. Cobrem autorização, dados ausentes, score, normalização de links, cota diária/fuso, intervalo, repetição, queda de preço, concorrência, recuperação de interrupções e segurança dos logs. Para OAuth, incluem vetor público de PKCE, state, callback inválida/repetida/expirada, corpo do POST, rotação de refresh token, erros HTTP, timeouts, falhas de gravação, entrada oculta e proteção do cofre. No Windows, o teste local de DPAPI usa somente dados sintéticos.
 
-Para o usuário executar somente uma coleta em simulação, depois de ter acesso autorizado à fonte:
+Os testes de rate limit simulam HTTP 429, `Retry-After` numérico e HTTP-date, backoff com jitter, cancelamento, teto de tentativas, deduplicação de detalhes, pausa configurável, preservação de resultados parciais e ausência de envio ao Telegram. Não usam esperas de rede reais.
+
+Após fornecer IDs públicos em `MELI_ITEM_IDS`, primeira coleta: filtro `mouse gamer`, até 5 anúncios:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --dry-run --once
+.\.venv\Scripts\python.exe main.py --dry-run --search-now --search-limit 5
 ```
 
 Nenhuma publicação automática real nem comando ao bot foi executado durante a implementação. O teste Telegram antigo foi preservado, mas não foi executado nesta etapa.

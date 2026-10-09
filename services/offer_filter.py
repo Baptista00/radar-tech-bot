@@ -1,36 +1,48 @@
-"""Score normalizado só pelos critérios observados; exige evidência de economia."""
+"""Score aditivo: dados ausentes não ganham pontos nem mudam o denominador."""
 
-import math
 from collections.abc import Sequence
 
+from config import DEFAULT_KNOWN_BRANDS
 from models import Product, ScoreResult
 
-KNOWN_BRANDS = {
-    "logitech", "razer", "hyperx", "corsair", "redragon", "dell", "lg", "samsung",
-    "asus", "acer", "lenovo", "hp", "kingston", "crucial", "western digital",
-    "sandisk", "intel", "amd", "nvidia", "msi", "gigabyte", "anker", "ugreen",
-    "baseus", "apple", "microsoft", "sony", "nintendo", "jbl", "fifine", "elgato",
-}
-WEIGHTS = {"discount": 40, "history": 35, "rating": 15, "sold": 5, "brand": 5}
+MIN_HISTORY_OBSERVATIONS = 3
 
 
-def score_offer(product: Product, previous_prices: Sequence[int]) -> ScoreResult:
+def _points(value: float, levels: tuple[tuple[float, int], ...]) -> int:
+    return next((points for minimum, points in levels if value >= minimum), 0)
+
+
+def score_offer(product: Product, previous_prices: Sequence[int], *,
+                known_brands: Sequence[str] = DEFAULT_KNOWN_BRANDS,
+                recently_published: bool = False) -> ScoreResult:
     criteria: dict[str, float] = {}
     discount = product.discount_percentage
     if discount is not None:
-        criteria["discount"] = min(discount / 50, 1.0)
-    history = [price for price in previous_prices if price > 0]
-    if history:
+        criteria["discount"] = _points(discount, ((40, 35), (30, 30), (20, 22), (10, 12)))
+    history = [price for price in previous_prices if type(price) is int and price > 0]
+    drop = 0.0
+    if len(history) >= MIN_HISTORY_OBSERVATIONS:
         lowest = min(history)
-        drop = max(0, (lowest - product.price) / lowest)
-        criteria["history"] = min(drop / 0.20, 1.0)
-    if product.rating is not None:
-        criteria["rating"] = max(0, min((product.rating - 3) / 2, 1.0))
+        drop = max(0, (lowest - product.price) * 100 / lowest)
+        criteria["history"] = _points(drop, ((20, 25), (10, 20), (5, 10)))
+        if product.price < lowest * 0.1:
+            criteria["price_inconsistency"] = -25
+    if product.free_shipping is not None:
+        criteria["free_shipping"] = 10 if product.free_shipping else 0
+    if product.seller_reputation is not None:
+        criteria["reputation"] = 10 if product.seller_reputation.upper() == "GREEN" else 0
     if product.sold_quantity is not None:
-        criteria["sold"] = min(math.log1p(max(0, product.sold_quantity)) / math.log1p(1000), 1.0)
+        criteria["sold"] = _points(product.sold_quantity, ((1000, 10), (500, 8), (100, 6), (50, 4), (10, 2)))
     if product.brand:
-        criteria["brand"] = float(product.brand.casefold() in KNOWN_BRANDS)
-    denominator = sum(WEIGHTS[name] for name in criteria)
-    score = round(100 * sum(WEIGHTS[name] * value for name, value in criteria.items()) / denominator) if denominator else 0
-    evidence = criteria.get("discount", 0) > 0 or criteria.get("history", 0) > 0
-    return ScoreResult(max(0, min(score, 100)), criteria, evidence)
+        criteria["brand"] = 5 if product.brand.casefold() in {brand.casefold() for brand in known_brands} else 0
+    if product.relevance_score is not None:
+        criteria["relevance"] = min(10, max(0, product.relevance_score))
+    if product.quality_penalty:
+        criteria["suspicious_title"] = -min(20, max(0, product.quality_penalty))
+    if recently_published:
+        criteria["recent_publication"] = -10
+    # Não pontuar estrelas inferidas, dados restritos ou campos ausentes.
+    evidence = (discount is not None and discount > 0) or drop > 0
+    if product.relevance_score == 0:
+        evidence = False
+    return ScoreResult(min(100, max(0, round(sum(criteria.values())))), criteria, evidence)

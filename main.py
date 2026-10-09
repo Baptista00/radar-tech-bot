@@ -2,11 +2,12 @@
 
 import argparse
 import logging
+import sys
 import time
 from dataclasses import replace
 
 from admin_bot import AdminBot
-from config import Config, ConfigError, load_config
+from config import DEFAULT_TERMS, Config, ConfigError, load_config, parse_item_ids
 from database import Database
 from engine import OfferEngine
 from models import timestamp, utcnow
@@ -54,7 +55,15 @@ def poll_admin(admin: AdminBot, telegram: TelegramService, database: Database) -
             backoff = min(backoff * 2, 60)
 
 
-def run(config: Config, *, once: bool = False, admin_only: bool = False) -> int:
+def run(config: Config, *, once: bool = False, admin_only: bool = False,
+        search_now: bool = False, search_limit: int | None = None) -> int:
+    if search_limit is not None and (not search_now or type(search_limit) is not int or not 1 <= search_limit <= 10):
+        raise ConfigError("--search-limit exige --search-now e um inteiro entre 1 e 10.")
+    if search_now:
+        once = True
+        terms = ("mouse gamer",) if search_limit is not None else DEFAULT_TERMS
+        config = replace(config, auto_publish=False, search_terms=terms,
+                         search_terms_per_cycle=len(terms), search_limit_per_term=search_limit or 10)
     if admin_only:
         config = replace(config, auto_publish=False)
     with instance_lock(config.database_path.with_suffix(".lock")):
@@ -62,7 +71,9 @@ def run(config: Config, *, once: bool = False, admin_only: bool = False) -> int:
         database.recover_interrupted()
         telegram = TelegramService(config.telegram_bot_token, config.telegram_chat_id,
                                    auto_publish=config.auto_publish)
-        engine = OfferEngine(config, database, MercadoLivreSource(config.mercado_livre_access_token), telegram)
+        source = MercadoLivreSource(request_interval_seconds=config.meli_request_delay_seconds,
+                                    item_ids=config.meli_item_ids, negative_keywords=config.negative_keywords)
+        engine = OfferEngine(config, database, source, telegram, reporter=print if once else None)
         admin = AdminBot(config, database, engine, telegram, search_enabled=not admin_only)
         database.set_state("online", True)
         database.set_state("auto_publish", config.auto_publish)
@@ -74,7 +85,7 @@ def run(config: Config, *, once: bool = False, admin_only: bool = False) -> int:
             if once:
                 engine.run_search()
                 last = database.stats(utcnow(), config.post_timezone)["last_run"]
-                return 1 if last and last["status"] == "failed" else 0
+                return 1 if last and last["status"] in {"failed", "partial"} else 0
             if admin_only:
                 database.set_state("next_search", None)
                 logger.info("Validação do painel: buscas de ofertas desativadas.")
@@ -87,19 +98,51 @@ def run(config: Config, *, once: bool = False, admin_only: bool = False) -> int:
             logger.info("Radar Tech encerrado.")
 
 
+def _search_limit(value: str) -> int:
+    try:
+        limit = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("use um inteiro entre 1 e 10") from None
+    if not 1 <= limit <= 10:
+        raise argparse.ArgumentTypeError("use um inteiro entre 1 e 10")
+    return limit
+
+
+def _item_ids(value: str) -> tuple[str, ...]:
+    try:
+        identifiers = parse_item_ids(value)
+        if not identifiers:
+            raise ConfigError("Informe ao menos um ID MLB de anúncio.")
+        return identifiers
+    except ConfigError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Radar Tech: busca de ofertas e painel privado no Telegram.")
     parser.add_argument("--dry-run", action="store_true", help="força simulação mesmo se AUTO_PUBLISH=true")
     parser.add_argument("--once", action="store_true", help="executa um ciclo de busca, sem painel, e encerra")
+    parser.add_argument("--search-now", action="store_true", help="consulta IDs configurados e filtra por 3 termos tech; força simulação, sem Telegram, e encerra")
+    parser.add_argument("--search-limit", type=_search_limit, metavar="N",
+                        help="com --search-now, filtra por 'mouse gamer' e consulta de 1 a 10 IDs configurados")
+    parser.add_argument("--item-ids", type=_item_ids, metavar="IDS",
+                        help="IDs públicos MLB separados por vírgulas; entrada direta, sem descoberta global")
     parser.add_argument("--admin-only", action="store_true", help="somente painel privado, sem buscas nem ofertas")
     args = parser.parse_args()
-    if args.once and args.admin_only:
-        parser.error("--once não pode ser usado com --admin-only")
+    if (args.once or args.search_now) and args.admin_only:
+        parser.error("--once/--search-now não podem ser usados com --admin-only")
+    if args.search_limit is not None and not args.search_now:
+        parser.error("--search-limit exige --search-now")
+    if (args.once or args.search_now) and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     configure_logging()
     try:
-        config = load_config(force_dry_run=args.dry_run or args.admin_only)
-        configure_logging((config.telegram_bot_token, config.mercado_livre_access_token))
-        return run(config, once=args.once, admin_only=args.admin_only)
+        config = load_config(force_dry_run=args.dry_run or args.admin_only or args.search_now)
+        if args.item_ids is not None:
+            config = replace(config, meli_item_ids=args.item_ids)
+        configure_logging((config.telegram_bot_token,))
+        return run(config, once=args.once, admin_only=args.admin_only,
+                   search_now=args.search_now, search_limit=args.search_limit)
     except (ConfigError, SafeError) as error:
         logger.error("%s", error)
         return 1

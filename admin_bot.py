@@ -47,7 +47,7 @@ class AdminBot:
             "/pause": self.pause, "/resume": self.resume, "/buscar": self.search,
         }
         handler = handlers.get(command)
-        answer = handler() if handler else "Comandos: /status /ultimas /stats /pause /resume /buscar /whoami"
+        answer = self.search(chat_id) if command == "/buscar" else handler() if handler else "Comandos: /status /ultimas /stats /pause /resume /buscar /whoami"
         self.telegram.reply(chat_id, answer)
 
     def _date(self, value: str | None) -> str:
@@ -107,9 +107,9 @@ class AdminBot:
         mode = "simulação" if not self.config.auto_publish else "publicação real"
         return f"Automação retomada no modo {mode}."
 
-    def search(self) -> str:
+    def search(self, reply_chat_id: int | None = None) -> str:
         if not self.search_enabled:
             return "Busca desativada nesta sessão de validação do painel."
-        if self.engine.request_search():
-            return "Busca solicitada. Consulte /status para acompanhar o resultado."
+        if self.engine.request_search(reply_chat_id):
+            return "Busca solicitada. Ao terminar, envio um resumo nesta conversa privada."
         return "Já existe busca em andamento ou na fila."
