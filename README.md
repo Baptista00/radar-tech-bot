@@ -2,6 +2,22 @@
 
 Base do bot de ofertas tech com SQLite, score explicável e administração pela conversa privada no Telegram. Modo inicial: **simulação**. Não há afiliados, scraping, cookies de conta ou canal de logs.
 
+**Estado das fontes:** Mercado Livre aguarda investigação/suporte para o HTTP 403 de itens de terceiros. Shopee aguarda aprovação; seu adaptador e o da Amazon são apenas estruturas sem consultas reais. A validação interna atual usa fixtures. **Manter `AUTO_PUBLISH=false`.**
+
+## Validar sem internet com fixtures
+
+```powershell
+.\.venv\Scripts\python.exe main.py --dry-run --fixture
+```
+
+Executa um ciclo e encerra, sem carregar `.env`, sem usar credenciais, sem importar a integração Mercado Livre e sem construir transporte Telegram. Usa os padrões seguros de `Config`, força `AUTO_PUBLISH=false` mesmo quando o ambiente diz `true`, lê `data/fixtures/offers.json` e grava no SQLite **`data/radartech-fixture.db`**, separado do banco real. O banco e seu lock continuam ignorados pelo Git; o JSON de cenários é versionável.
+
+São 26 registros simulados, 25 IDs únicos `FIXTURE-*` e links `https://example.com/...`: preços bons/comuns, histórico em queda, desconto sem referência, SSD suspeito, categorias tech, produto irrelevante, repetição e campos ausentes. A saída identifica a simulação, normaliza candidatos, salva preços válidos, aplica relevância, score, categorias ativas, ranking e antispam. Preço ausente é rejeitado; item irrelevante pode alimentar histórico, mas não entra no ranking.
+
+A primeira execução carrega observações **sintéticas** anteriores, incluindo R$299 → R$279 → R$249 → R$199. A carga tem uma âncora persistente e não se repete. Novos ciclos acrescentam observações atuais normalmente. Simulações obedecem ao intervalo global de 30 minutos e às demais travas: várias ofertas podem estar aprovadas, mas só uma simulação ser reservada no ciclo. Nenhuma linha é criada em `publications`.
+
+`--fixture` também força segurança sem `--dry-run`. Não combina com `--admin-only`, `--search-now`, `--search-limit` ou `--item-ids`. Este comando não inicia scheduler nem painel, portanto não exige bot configurado.
+
 ## Iniciar no Windows
 
 Python 3.12 ou superior. Ambiente local preparado em `.venv`, que está ignorado pelo Git.
@@ -49,11 +65,23 @@ Até configurar o ID, apenas `/whoami` fica disponível. Os demais comandos resp
 | `/status` | Estado do sistema e buscador, modo, pausa, última/próxima busca, contagens, simulações e últimos erros. |
 | `/ultimas` | Últimas cinco publicações confirmadas, com preço e link. |
 | `/stats` | Observações analisadas, produtos únicos, total publicado, média de score e termos mais publicados. |
-| `/pause` | Bloqueia novas publicações e simulações; coleta e histórico continuam. Um envio já em andamento pode concluir. |
+| `/pause` | Bloqueia novas buscas automáticas, publicações e simulações. Ciclo já iniciado pode concluir coleta; envio já em andamento pode concluir. |
 | `/resume` | Retoma o modo configurado. Não altera `AUTO_PUBLISH`. |
 | `/buscar` | Enfileira consulta e envia resumo privado ao concluir; recusa execução duplicada. |
+| `/config` | Mostra somente modo, threshold, limites, repost, intervalo, categorias ativas e fonte atual. Nunca credenciais. |
+| `/fixture` | Executa simulação local completa e responde ao admin com resumo. Usa `data/radartech-admin-fixture.db`, separado do scheduler e do banco real; nunca publica no canal. |
 
 O painel usa long polling e exige que este processo permaneça aberto. Com processo desligado, o bot não responde `/status`. Outro processo de polling ou um webhook existente pode causar HTTP 409; o app informa o conflito e não remove webhooks automaticamente.
+
+`/config` e `/fixture` exigem o mesmo admin numérico e conversa privada dos demais comandos. `/status` mostra fonte, Auto publish ON/OFF, pausa, buscas, analisados, aprovados, publicações e erros. No painel, respostas administrativas usam Telegram; os testes desta etapa simulam esse transporte. A CLI `--fixture` não envia nem respostas privadas.
+
+## Scheduler interno
+
+`SEARCH_INTERVAL_MINUTES=30`: um único worker por engine, sem serviço externo. Executa quando o prazo vence e agenda o próximo ciclo a partir do término. O próximo prazo e o estado de pausa sobrevivem ao reinício. `runtime_lock` continua permitindo somente uma instância por banco; comandos concorrentes não abrem duas buscas no mesmo motor.
+
+Com `AUTO_PUBLISH=false`, pode coletar, registrar histórico e simular, sem publicar. Com automação pausada, não inicia buscas automáticas e `/status` não anuncia próximo horário; `/resume` retoma sem mudar o modo seguro. `/buscar` é uma solicitação manual explícita: pode coletar durante pausa, mas a reserva de publicação/simulação permanece bloqueada. `/fixture` usa seu próprio banco de demonstração e permanece exclusivamente simulado.
+
+Para o bot usar dados locais no scheduler, configure manualmente `OFFER_SOURCE=fixture` antes de iniciar o painel habitual. Nesse caso o motor usa `radartech-fixture.db` e força publicação desligada. O exemplo recomenda fixture; instalações existentes sem essa opção preservam `mercado_livre` como fonte. Nenhuma configuração local foi alterada automaticamente.
 
 ## Consulta de anúncios em modo seguro
 
@@ -225,9 +253,11 @@ Referências oficiais: [aplicações e grants](https://developers.mercadolivre.c
 | `MIN_OFFER_SCORE` | `70` | Score mínimo, além de evidência de economia. |
 | `MAX_POSTS_PER_DAY` | `12` | Limite por dia no fuso configurado. |
 | `MIN_MINUTES_BETWEEN_POSTS` | `30` | Intervalo global, inclusive para quedas significativas. |
-| `REPUBLISH_AFTER_HOURS` | `72` | Janela sem repetir produto. |
-| `SIGNIFICANT_PRICE_DROP_PERCENT` | `10` | Queda mínima em relação ao último preço publicado para abrir exceção à janela de 72h. |
-| `SEARCH_INTERVAL_MINUTES` | `60` | Intervalo depois do fim de cada ciclo. |
+| `REPOST_AFTER_HOURS` | `72` | Janela sem repetir o mesmo item/fonte. |
+| `REPOST_PRICE_DROP_PERCENT` | `10` | Queda de pelo menos 10% frente ao último preço publicado para exceção antes de 72h; mantém intervalo global e cota diária. |
+| `SEARCH_INTERVAL_MINUTES` | `30` | Intervalo depois do fim de cada ciclo automático. |
+| `OFFER_SOURCE` | `mercado_livre`; exemplo: `fixture` | Seleção de fonte. `shopee` e `amazon` falham com pendência explícita, sem rede. |
+| `ACTIVE_CATEGORIES` | todas | Categorias locais separadas por vírgulas; desativadas não entram no ranking. |
 | `SEARCH_TERMS` | lista tech do exemplo | Termos separados por vírgulas. |
 | `SEARCH_TERMS_PER_CYCLE` | `3` | Rodízio persistente dos termos; evita consultar tudo de uma vez. |
 | `SEARCH_LIMIT_PER_TERM` | `10` | Máximo de IDs configurados por ciclo; valores maiores são limitados a 10. |
@@ -245,6 +275,8 @@ Referências oficiais: [aplicações e grants](https://developers.mercadolivre.c
 
 O ciclo publica ou simula as melhores ofertas elegíveis primeiro. As restantes ficam registradas nas avaliações; não existe fila de envio de preços antigos. São reavaliadas caso apareçam em uma busca posterior. A ordem dos termos continua após reiniciar.
 
+Os nomes legados `REPUBLISH_AFTER_HOURS` e `SIGNIFICANT_PRICE_DROP_PERCENT` continuam aceitos. Quando ambos os nomes estiverem definidos, `REPOST_AFTER_HOURS` e `REPOST_PRICE_DROP_PERCENT` têm prioridade. Categorias disponíveis: `mouse`, `teclado`, `headset`, `ssd`, `ram`, `monitor`, `notebook`, `gpu`, `cpu`, `microfone`, `webcam`, `controle`, `power_bank`, `hub`, `carregador`, `setup`, `other`. Ícones e classificação são determinísticos, sem IA externa.
+
 Pausas, histórico, publicações e limites sobrevivem a reinicializações. Simulações têm histórico separado: obedecem aos limites para mostrar um comportamento realista, mas não consomem as cotas de envio real nem aparecem em `/ultimas` ou na média de publicações. Uma mesma oferta não gera repetidamente uma prévia a cada busca.
 
 Publicações passam por uma reserva em transação SQLite antes do envio. Timeout ou resposta sem confirmação pode significar que a mensagem já chegou ao canal: nesse caso, o app não repete o POST, marca a tentativa como `unknown` e pausa novas publicações. Confira o canal antes de `/resume`; aquele produto continua bloqueado até revisão manual do registro no banco. Uma interrupção entre envio e gravação é tratada da mesma forma no próximo início. Cotas consideram envios pendentes/sem confirmação para evitar excesso. Esta proteção prefere não reenviar a prometer entrega “exatamente uma vez”, que a Bot API não oferece neste fluxo.
@@ -252,6 +284,16 @@ Publicações passam por uma reserva em transação SQLite antes do envio. Timeo
 ## Como o score funciona
 
 Score de 0 a 100: **soma de pontos**, sem reescalar pelos campos disponíveis. Ausência de dados não aumenta artificialmente o score.
+
+| Faixa | Classificação |
+| --- | --- |
+| 0–39 | Fraco |
+| 40–59 | Regular |
+| 60–69 | Interessante |
+| 70–84 | Boa oferta |
+| 85–100 | Oferta excelente |
+
+Os pesos do Score V2 foram preservados e calibrados por cenários de teste: desconto e histórico concentram até 60 pontos; relevância é também condição de aprovação. Bons preços com evidência superam produtos comuns. Marca sozinha soma 5, SSD suspeito recebe penalidade, e desconto anunciado sem `original_price` não vira economia calculada. A faixa aparece junto do score na mensagem e no ranking.
 
 | Critério | Máximo | Pontos |
 | --- | --- | --- |
@@ -264,9 +306,21 @@ Score de 0 a 100: **soma de pontos**, sem reescalar pelos campos disponíveis. A
 
 Desconto usa exclusivamente `(original_price - price) / original_price * 100`, com duas casas decimais, quando ambos existem e o original é maior. Campos ausentes não são usados. Avaliação não pontua porque a fonte não fornece uma avaliação confiável do produto. **Sem desconto positivo ou queda positiva no histórico, não há aprovação**, mesmo alterando o threshold. Marca sozinha soma apenas 5 e não aprova. Relevância soma até 10; irrelevância impede aprovação. Título suspeito perde até 20; publicação recente perde 10; preço abaixo de 10% da referência histórica suficiente perde 25. Resultado limitado entre 0 e 100. Antispam continua como trava adicional. A fórmula é heurística inicial; score não promete menor preço de mercado.
 
-Na fonte atual de terceiros, sem histórico suficiente ou dados confiáveis de reputação/vendas, máximo 60 (35 desconto + 10 frete + 5 marca + 10 relevância). Threshold 70 exige mais evidência; não foi reduzido automaticamente. É normal haver poucos ou nenhum aprovado com `MIN_OFFER_SCORE=70`; o relatório mantém visíveis todos os scores para avaliação. Não ajusta o threshold nem inventa dados para produzir aprovados. Campos ausentes são omitidos das prévias e nenhuma janela de “menor preço em X dias” é anunciada.
+Na fonte atual de terceiros, sem histórico suficiente ou dados confiáveis de reputação/vendas, máximo 60 (35 desconto + 10 frete + 5 marca + 10 relevância). Threshold 70 exige mais evidência; não foi reduzido automaticamente. É normal haver poucos ou nenhum aprovado com `MIN_OFFER_SCORE=70`; o relatório mantém visíveis todos os scores para avaliação. Não ajusta o threshold nem inventa dados para produzir aprovados.
+
+A frase **“Menor preço observado pelo Radar nos últimos X dias do histórico local”** exige X ≥ 3, ao menos três observações anteriores e cobertura de cada dia UTC anterior dentro da janela configurada, sem lacunas. O preço atual precisa ser menor ou igual a todos os preços anteriores na janela. Observações futuras, de outro item/fonte ou do próprio instante atual não contam. Muitas coletas no mesmo dia não comprovam cobertura diária. Isso descreve apenas observações locais, nunca o mínimo de todo o mercado. Três preços anteriores permitem calcular queda, mas não comprovam uma janela de 30 dias.
+
+Postagens usam texto simples (sem `parse_mode` HTML/Markdown), título limitado, ícone da categoria, preço, desconto calculado quando válido, faixa do score e frete grátis somente quando confirmado. Campos ausentes são omitidos. Nenhuma alegação de custo-benefício, avaliação ou vendas é inventada. Mensagens de fixture identificam explicitamente dados fictícios.
 
 ## Arquitetura e dados
+
+```text
+OfferSource → OfferBatch[OfferCandidate] → normalização/relevância
+           → deduplicação por fonte/item → SQLite/histórico → score/threshold
+           → ranking → reserva com antispam → formatter → OfferPublisher
+```
+
+`OfferSource` define `begin_cycle()` e `search(term, limit)`. `OfferBatch` mantém candidatos, diagnósticos, erros e resultados parciais. Preços de candidatos são centavos inteiros; ausências permanecem `None`. `Product` representa dados já normalizados. O engine não importa módulos de Mercado Livre e aceita fontes novas pelo mesmo contrato. `MercadoLivreAdapter` apenas traduz o envelope legado: transporte, OAuth, bulk, fallback, sale_price e tratamento do 403 permanecem intactos. `FixtureSource` é funcional; `ShopeeSource` e `AmazonSource` são estruturas sem integração real. `OfflinePublisher` não possui cliente HTTP e recusa qualquer envio; o banco também impede reservar publicação real de fixture.
 
 ```text
 main.py                  início, ciclo de vida e polling dos comandos
@@ -286,6 +340,15 @@ services/mercado_livre_http.py sessão HTTP própria, sem proxy herdado e com TL
 services/meli_oauth_store.py cofre local protegido e gravação atômica
 services/offer_filter.py  cálculo do score
 services/offer_formatter.py mensagem final
+services/offer_source.py  protocolo, lote neutro e ponte para fonte existente
+services/offer_normalizer.py candidatos genéricos para produtos válidos
+services/categories.py   categorias e ícones locais
+services/fixture_source.py fonte local sem credenciais
+services/fixture_runner.py simulação isolada e histórico sintético idempotente
+services/publisher.py     protocolo de saída e transporte offline
+data/fixtures/offers.json cenários inteiramente simulados e versionáveis
+tests/test_fixture.py     fonte, CLI, arquitetura, segurança e admin
+tests/test_offer_core.py  faixas, calibração, histórico, antispam, formatter e scheduler
 tests/test_mvp.py         testes sem rede nem leitura de .env
 tests/test_mercado_livre_auth.py testes OAuth, erros, rotação e cofre com dados sintéticos
 tests/test_mercado_livre_http.py testes de isolamento de proxy e validação TLS, sem rede

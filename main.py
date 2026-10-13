@@ -13,10 +13,30 @@ from engine import OfferEngine
 from models import timestamp, utcnow
 from runtime_lock import instance_lock
 from safety import SafeError, configure_logging
-from services.mercado_livre import MercadoLivreSource
+from services.offer_source import AmazonSource, MercadoLivreAdapter, ShopeeSource
 from telegram_service import TelegramService
 
 logger = logging.getLogger(__name__)
+
+
+def MercadoLivreSource(**kwargs):
+    # Import tardio: a CLI fixture nem carrega a integração bloqueada.
+    from services.mercado_livre import MercadoLivreSource as implementation
+    return implementation(**kwargs)
+
+
+def make_source(config: Config):
+    if config.offer_source == "fixture":
+        from services.fixture_source import FixtureSource
+        return FixtureSource()
+    if config.offer_source == "shopee":
+        return ShopeeSource()
+    if config.offer_source == "amazon":
+        return AmazonSource()
+    if config.offer_source != "mercado_livre":
+        raise ConfigError("OFFER_SOURCE inválida.")
+    return MercadoLivreAdapter(MercadoLivreSource(request_interval_seconds=config.meli_request_delay_seconds,
+                               item_ids=config.meli_item_ids, negative_keywords=config.negative_keywords))
 
 
 def poll_admin(admin: AdminBot, telegram: TelegramService, database: Database) -> int:
@@ -66,13 +86,20 @@ def run(config: Config, *, once: bool = False, admin_only: bool = False,
                          search_terms_per_cycle=len(terms), search_limit_per_term=search_limit or 10)
     if admin_only:
         config = replace(config, auto_publish=False)
+    if config.offer_source == "fixture":
+        from services.fixture_runner import fixture_config
+        config = fixture_config(config, offline=False)
+    source = make_source(config)
+    if getattr(source, "simulation_only", False) is True:
+        config = replace(config, auto_publish=False)
     with instance_lock(config.database_path.with_suffix(".lock")):
         database = Database(config.database_path)
         database.recover_interrupted()
+        if config.offer_source == "fixture":
+            from services.fixture_runner import seed_fixture_history
+            seed_fixture_history(database, source, utcnow())
         telegram = TelegramService(config.telegram_bot_token, config.telegram_chat_id,
                                    auto_publish=config.auto_publish)
-        source = MercadoLivreSource(request_interval_seconds=config.meli_request_delay_seconds,
-                                    item_ids=config.meli_item_ids, negative_keywords=config.negative_keywords)
         engine = OfferEngine(config, database, source, telegram, reporter=print if once else None)
         admin = AdminBot(config, database, engine, telegram, search_enabled=not admin_only)
         database.set_state("online", True)
@@ -121,6 +148,7 @@ def _item_ids(value: str) -> tuple[str, ...]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Radar Tech: busca de ofertas e painel privado no Telegram.")
     parser.add_argument("--dry-run", action="store_true", help="força simulação mesmo se AUTO_PUBLISH=true")
+    parser.add_argument("--fixture", action="store_true", help="simulação local com fixtures, sem .env, rede ou Telegram; executa e encerra")
     parser.add_argument("--once", action="store_true", help="executa um ciclo de busca, sem painel, e encerra")
     parser.add_argument("--search-now", action="store_true", help="consulta IDs configurados e filtra por 3 termos tech; força simulação, sem Telegram, e encerra")
     parser.add_argument("--search-limit", type=_search_limit, metavar="N",
@@ -129,14 +157,20 @@ def main() -> int:
                         help="IDs públicos MLB separados por vírgulas; entrada direta, sem descoberta global")
     parser.add_argument("--admin-only", action="store_true", help="somente painel privado, sem buscas nem ofertas")
     args = parser.parse_args()
+    if args.fixture and (args.admin_only or args.search_now or args.search_limit is not None or args.item_ids is not None):
+        parser.error("--fixture não combina com opções de fonte real ou painel")
     if (args.once or args.search_now) and args.admin_only:
         parser.error("--once/--search-now não podem ser usados com --admin-only")
     if args.search_limit is not None and not args.search_now:
         parser.error("--search-limit exige --search-now")
-    if (args.once or args.search_now) and hasattr(sys.stdout, "reconfigure"):
+    if (args.once or args.search_now or args.fixture) and hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     configure_logging()
     try:
+        if args.fixture:
+            from services.fixture_runner import run_fixture_simulation
+            report = run_fixture_simulation()
+            return 1 if report.status in {"failed", "partial"} else 0
         config = load_config(force_dry_run=args.dry_run or args.admin_only or args.search_now)
         if args.item_ids is not None:
             config = replace(config, meli_item_ids=args.item_ids)

@@ -2,6 +2,8 @@
 
 from models import Product, ScoreResult, SearchReport
 from safety import clean_text
+from services.categories import category_icon
+from services.offer_source import SOURCE_NAMES
 
 
 def format_price(cents: int) -> str:
@@ -10,18 +12,27 @@ def format_price(cents: int) -> str:
 
 
 def format_offer(product: Product, result: ScoreResult) -> str:
-    lines = ["🔥 ACHADO RADAR TECH", "", product.title, "", format_price(product.price)]
+    # Texto simples: TelegramService não define parse_mode, portanto não interpreta
+    # tags HTML ou caracteres Markdown recebidos no título.
+    lines = ["ACHADO RADAR TECH", "", f"{category_icon(product.category)} {clean_text(product.title, 180)}",
+             "", format_price(product.price)]
+    if product.source == "fixture":
+        lines.insert(1, "SIMULAÇÃO — dados fictícios")
     discount = product.discount_percentage
     if discount is not None:
-        percent = f"{discount:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+        percent = f"{discount:.2f}".rstrip("0").rstrip(".").replace(".", ",")
         lines.append(f"{percent}% OFF")
     if product.rating is not None:
-        lines.extend(["", f"⭐ Avaliação: {product.rating:g}"])
-    lines.append(f"Radar Score: {result.score}/100")
-    if result.criteria.get("history", 0) > 0:
+        lines.extend(["", f"Avaliação: {product.rating:g}"])
+    lines.append(f"⭐ Radar Score: {result.score}/100 — {result.band}")
+    if product.free_shipping is True:
+        lines.append("Frete grátis")
+    if result.history_claim_days is not None and result.history_claim_days >= 3:
+        description = f"Menor preço observado pelo Radar nos últimos {result.history_claim_days} dias do histórico local."
+    elif result.criteria.get("history", 0) > 0:
         description = "Preço abaixo das observações anteriores do histórico local."
     else:
-        description = "Confira as características e condições no anúncio."
+        description = "Confira as características, compatibilidade e condições no anúncio."
     lines.extend(["", description, "", "Ver oferta:", product.url, "",
                   "Radar Tech — a gente encontra, você economiza."])
     return "\n".join(lines)
@@ -51,17 +62,17 @@ def format_dry_run_report(report: SearchReport, threshold: int) -> str:
         if product.discount_percentage is not None:
             percent = f"{product.discount_percentage:.2f}".rstrip("0").rstrip(".").replace(".", ",")
             lines.append(f"Desconto: {percent}%")
-        lines.append(f"Radar Score: {entry.result.score}/100")
+        lines.append(f"Radar Score: {entry.result.score}/100 — {entry.result.band}")
         if product.sold_quantity is not None:
             lines.append(f"Vendas: {product.sold_quantity}")
         if product.free_shipping is not None:
             lines.append(f"Frete grátis: {'Sim' if product.free_shipping else 'Não'}")
         passed = "passa" if entry.result.score >= threshold else "não passa"
         lines.extend([f"Status: {'APROVADO' if entry.result.approved(threshold) else 'REPROVADO'} | threshold: {passed}",
-                      entry.decision, "Mercado Livre", "URL: " + product.url])
+                      entry.decision, SOURCE_NAMES.get(product.source, "Fonte personalizada"), "URL: " + product.url])
     lines.extend(["", "TOP OFERTAS:", "Ranking para análise; aprovação e antispam indicados acima."])
     for index, entry in enumerate(offers[:10], 1):
-        lines.append(f"{index}. {clean_text(entry.product.title, 180)} | {format_price(entry.product.price)} | {entry.result.score}/100")
+        lines.append(f"{index}. {clean_text(entry.product.title, 180)} | {format_price(entry.product.price)} | {entry.result.score}/100 — {entry.result.band}")
     if report.diagnostics:
         lines.extend(["", "DIAGNÓSTICO SEGURO (primeiros 10 registros):"])
         for diagnostic in report.diagnostics[:10]:

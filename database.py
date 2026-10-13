@@ -3,7 +3,7 @@
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from zoneinfo import ZoneInfo
@@ -238,6 +238,24 @@ class Database:
             connection.execute("INSERT INTO offer_evaluations VALUES (?,?,?,?,?)",
                                (run_id, product_id, result.score, int(approved), json.dumps(result.criteria)))
 
+    def local_lowest_claim(self, product_id: int, price: int, now: datetime, days: int) -> bool:
+        """Exige cobertura diária da janela UTC, além de três observações anteriores.
+
+        Autoriza apenas 'menor preço observado pelo Radar', nunca mínimo de mercado.
+        Observações do instante atual e do futuro não são evidência anterior.
+        """
+        if days < 3:
+            return False
+        now = now.astimezone(timezone.utc)
+        with self.connect() as connection:
+            rows = list(connection.execute(
+                "SELECT price,checked_at FROM price_history WHERE product_id=? AND checked_at>=? AND checked_at<?",
+                (product_id, timestamp(now - timedelta(days=days)), timestamp(now)),
+            ))
+        required = {(now - timedelta(days=offset)).date() for offset in range(1, days + 1)}
+        observed = {datetime.fromisoformat(row["checked_at"]).date() for row in rows}
+        return len(rows) >= 3 and required.issubset(observed) and price <= min(row["price"] for row in rows)
+
     @staticmethod
     def _related_product_ids(connection: sqlite3.Connection, product_id: int) -> tuple[int, ...]:
         """Bloqueio conservador entre identidades legadas; não transfere preços."""
@@ -275,6 +293,8 @@ class Database:
     def reserve(self, product_id: int, product: Product, score: int, now: datetime,
                 config: Config, *, simulate: bool) -> tuple[int | None, str]:
         """Limites e reserva no mesmo write lock: comandos e ciclos não furam cota."""
+        if product.source == "fixture" and not simulate:
+            return None, "fixture permite somente simulação"
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             if self._get(connection, "paused", False):

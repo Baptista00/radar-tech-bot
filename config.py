@@ -9,6 +9,7 @@ from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
+from services.categories import CATEGORY_ICONS
 from services.offer_relevance import DEFAULT_NEGATIVE_KEYWORDS
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -41,7 +42,9 @@ class Config:
     min_minutes_between_posts: int = 30
     republish_after_hours: int = 72
     significant_price_drop_percent: int = 10
-    search_interval_minutes: int = 60
+    search_interval_minutes: int = 30
+    offer_source: str = "mercado_livre"
+    active_categories: tuple[str, ...] = tuple(CATEGORY_ICONS)
     search_terms: tuple[str, ...] = DEFAULT_TERMS
     search_terms_per_cycle: int = 3
     search_limit_per_term: int = 10
@@ -91,6 +94,15 @@ def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool
     mode = "false" if force_dry_run else environ.get("AUTO_PUBLISH", "false").strip().lower()
     if mode not in {"true", "false"}:
         raise ConfigError("AUTO_PUBLISH aceita somente true ou false.")
+    source = environ.get("OFFER_SOURCE", "mercado_livre").strip().lower()
+    if source not in {"mercado_livre", "fixture", "shopee", "amazon"}:
+        raise ConfigError("OFFER_SOURCE inválida.")
+    if source == "fixture":
+        mode = "false"
+    categories = tuple(dict.fromkeys(part.strip() for part in environ.get(
+        "ACTIVE_CATEGORIES", ",".join(CATEGORY_ICONS)).split(",") if part.strip()))
+    if not categories or any(category not in CATEGORY_ICONS for category in categories):
+        raise ConfigError("ACTIVE_CATEGORIES exige categorias conhecidas.")
     raw_admin = environ.get("TELEGRAM_ADMIN_ID", "").strip()
     admin_id = None
     if raw_admin:
@@ -124,9 +136,10 @@ def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool
         min_offer_score=_integer(environ, "MIN_OFFER_SCORE", 70, 0, 100),
         max_posts_per_day=_integer(environ, "MAX_POSTS_PER_DAY", 12, 1, 100),
         min_minutes_between_posts=_integer(environ, "MIN_MINUTES_BETWEEN_POSTS", 30, 1, 1440),
-        republish_after_hours=_integer(environ, "REPUBLISH_AFTER_HOURS", 72, 1, 8760),
-        significant_price_drop_percent=_integer(environ, "SIGNIFICANT_PRICE_DROP_PERCENT", 10, 1, 90),
-        search_interval_minutes=_integer(environ, "SEARCH_INTERVAL_MINUTES", 60, 5, 1440),
+        republish_after_hours=_integer(environ, "REPOST_AFTER_HOURS" if "REPOST_AFTER_HOURS" in environ else "REPUBLISH_AFTER_HOURS", 72, 1, 8760),
+        significant_price_drop_percent=_integer(environ, "REPOST_PRICE_DROP_PERCENT" if "REPOST_PRICE_DROP_PERCENT" in environ else "SIGNIFICANT_PRICE_DROP_PERCENT", 10, 1, 90),
+        search_interval_minutes=_integer(environ, "SEARCH_INTERVAL_MINUTES", 30, 5, 1440),
+        offer_source=source, active_categories=categories,
         search_terms=terms,
         # Limites desta etapa também protegem configurações antigas do ambiente.
         search_terms_per_cycle=min(3, _integer(environ, "SEARCH_TERMS_PER_CYCLE", 3, 1, 10)),

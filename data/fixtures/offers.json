@@ -1,0 +1,371 @@
+{
+  "schema_version": 1,
+  "notice": "DADOS INTEIRAMENTE SIMULADOS. Preços em centavos. Não representam ofertas reais.",
+  "offers": [
+    {
+      "id": "FIXTURE-MOUSE-001",
+      "title": "Logitech G305 Wireless Mouse Gamer",
+      "terms": [
+        "mouse gamer"
+      ],
+      "price": 19900,
+      "original_price": 29900,
+      "url": "https://example.com/radar/mouse-001",
+      "currency_id": "BRL",
+      "brand": "Logitech",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000,
+      "history_prices": [
+        29900,
+        27900,
+        24900
+      ]
+    },
+    {
+      "id": "FIXTURE-MOUSE-STRONG",
+      "title": "Mouse Gamer Logitech Oferta Simulada",
+      "terms": [
+        "mouse gamer"
+      ],
+      "price": 17990,
+      "original_price": 32990,
+      "url": "https://example.com/radar/mouse-strong",
+      "currency_id": "BRL",
+      "brand": "Logitech",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-MOUSE-COMMON",
+      "title": "Mouse Gamer Logitech Preço Comum",
+      "terms": [
+        "mouse gamer"
+      ],
+      "price": 19900,
+      "original_price": null,
+      "url": "https://example.com/radar/mouse-common",
+      "currency_id": "BRL",
+      "brand": "Logitech",
+      "free_shipping": false
+    },
+    {
+      "id": "FIXTURE-HEADSET-001",
+      "title": "Headset Gamer HyperX Cloud",
+      "terms": [
+        "headset gamer"
+      ],
+      "price": 24900,
+      "original_price": 49900,
+      "url": "https://example.com/radar/headset-001",
+      "currency_id": "BRL",
+      "brand": "HyperX",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-SSD-001",
+      "title": "SSD NVMe Kingston 1TB",
+      "terms": [
+        "ssd nvme"
+      ],
+      "price": 29900,
+      "original_price": 49900,
+      "url": "https://example.com/radar/ssd-001",
+      "currency_id": "BRL",
+      "brand": "Kingston",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-SSD-SUSPICIOUS",
+      "title": "SSD NVMe SSD SSD SSD Milagre!!!",
+      "terms": [
+        "ssd nvme"
+      ],
+      "price": 999,
+      "original_price": 29900,
+      "url": "https://example.com/radar/ssd-suspicious",
+      "currency_id": "BRL",
+      "history_prices": [
+        29900,
+        27900,
+        24900
+      ]
+    },
+    {
+      "id": "FIXTURE-NOTEBOOK-001",
+      "title": "Notebook Lenovo IdeaPad Simulado",
+      "terms": [
+        "notebook"
+      ],
+      "price": 239900,
+      "original_price": 359900,
+      "url": "https://example.com/radar/notebook-001",
+      "currency_id": "BRL",
+      "brand": "Lenovo",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-NOTEBOOK-NO-REFERENCE",
+      "title": "Notebook Lenovo Sem Preço de Referência",
+      "terms": [
+        "notebook"
+      ],
+      "price": 249900,
+      "original_price": null,
+      "url": "https://example.com/radar/notebook-no-reference",
+      "currency_id": "BRL",
+      "brand": "Lenovo",
+      "claimed_discount": 90
+    },
+    {
+      "id": "FIXTURE-MONITOR-001",
+      "title": "Monitor LG 24 Polegadas",
+      "terms": [
+        "monitor"
+      ],
+      "price": 59900,
+      "original_price": 109900,
+      "url": "https://example.com/radar/monitor-001",
+      "currency_id": "BRL",
+      "brand": "LG",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-KEYBOARD-001",
+      "title": "Teclado Mecânico Redragon",
+      "terms": [
+        "teclado mecânico"
+      ],
+      "price": 17900,
+      "original_price": 29900,
+      "url": "https://example.com/radar/keyboard-001",
+      "currency_id": "BRL",
+      "brand": "Redragon",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-RAM-001",
+      "title": "Memória RAM Kingston DDR4 16GB",
+      "terms": [
+        "memória ram"
+      ],
+      "price": 15900,
+      "original_price": 25900,
+      "url": "https://example.com/radar/ram-001",
+      "currency_id": "BRL",
+      "brand": "Kingston",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-WEBCAM-001",
+      "title": "Webcam Logitech Simulada",
+      "terms": [
+        "webcam"
+      ],
+      "price": 8900,
+      "original_price": 14900,
+      "url": "https://example.com/radar/webcam-001",
+      "currency_id": "BRL",
+      "brand": "Logitech",
+      "free_shipping": true,
+      "rating": 4.6
+    },
+    {
+      "id": "FIXTURE-MICROPHONE-001",
+      "title": "Microfone USB para Setup",
+      "terms": [
+        "microfone"
+      ],
+      "price": 18900,
+      "original_price": 29900,
+      "url": "https://example.com/radar/microphone-001",
+      "currency_id": "BRL",
+      "free_shipping": true
+    },
+    {
+      "id": "FIXTURE-CHARGER-001",
+      "title": "Carregador USB C 65W",
+      "terms": [
+        "carregador"
+      ],
+      "price": 9900,
+      "original_price": 13900,
+      "url": "https://example.com/radar/charger-001",
+      "currency_id": "BRL",
+      "free_shipping": false
+    },
+    {
+      "id": "FIXTURE-POWERBANK-001",
+      "title": "Power Bank 20000mAh",
+      "terms": [
+        "power bank"
+      ],
+      "price": 13900,
+      "original_price": 19900,
+      "url": "https://example.com/radar/powerbank-001",
+      "currency_id": "BRL",
+      "free_shipping": true
+    },
+    {
+      "id": "FIXTURE-HUB-001",
+      "title": "Hub USB Tipo C",
+      "terms": [
+        "hub usb"
+      ],
+      "price": 7900,
+      "original_price": 11900,
+      "url": "https://example.com/radar/hub-001",
+      "currency_id": "BRL",
+      "free_shipping": true
+    },
+    {
+      "id": "FIXTURE-IRRELEVANT-001",
+      "title": "Panela de Cozinha Sem Relação com Tecnologia",
+      "terms": [
+        "mouse gamer"
+      ],
+      "price": 8900,
+      "original_price": 19900,
+      "url": "https://example.com/radar/irrelevant-001",
+      "currency_id": "BRL",
+      "free_shipping": true
+    },
+    {
+      "id": "FIXTURE-MOUSE-001",
+      "title": "Logitech G305 Wireless Mouse Gamer",
+      "terms": [
+        "mouse gamer"
+      ],
+      "price": 19900,
+      "original_price": 29900,
+      "url": "https://example.com/radar/mouse-001",
+      "currency_id": "BRL",
+      "brand": "Logitech",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000,
+      "history_prices": [
+        29900,
+        27900,
+        24900
+      ],
+      "scenario": "Mesmo anúncio repetido; deduplicar por fonte e ID."
+    },
+    {
+      "id": "FIXTURE-MOUSE-NO-SHIPPING",
+      "title": "Mouse Gamer Logitech Sem Informação de Frete",
+      "terms": [
+        "mouse gamer"
+      ],
+      "price": 14900,
+      "original_price": 24900,
+      "url": "https://example.com/radar/mouse-no-shipping",
+      "currency_id": "BRL",
+      "brand": "Logitech",
+      "free_shipping": null
+    },
+    {
+      "id": "FIXTURE-HEADSET-NO-BRAND",
+      "title": "Headset Gamer Sem Marca Informada",
+      "terms": [
+        "headset gamer"
+      ],
+      "price": 15900,
+      "original_price": 26900,
+      "url": "https://example.com/radar/headset-no-brand",
+      "currency_id": "BRL",
+      "free_shipping": true
+    },
+    {
+      "id": "FIXTURE-MOUSE-NO-PRICE",
+      "title": "Mouse Gamer Sem Preço Informado",
+      "terms": [
+        "mouse gamer"
+      ],
+      "price": null,
+      "original_price": 29900,
+      "url": "https://example.com/radar/mouse-no-price",
+      "currency_id": "BRL",
+      "brand": "Logitech"
+    },
+    {
+      "id": "FIXTURE-GPU-001",
+      "title": "Placa de Vídeo GeForce Simulada",
+      "terms": [
+        "placa de vídeo"
+      ],
+      "price": 159900,
+      "original_price": 219900,
+      "url": "https://example.com/radar/gpu-001",
+      "currency_id": "BRL",
+      "brand": "Nvidia",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-CPU-001",
+      "title": "Processador AMD Ryzen Simulado",
+      "terms": [
+        "processador"
+      ],
+      "price": 69900,
+      "original_price": 99900,
+      "url": "https://example.com/radar/cpu-001",
+      "currency_id": "BRL",
+      "brand": "AMD",
+      "free_shipping": true,
+      "seller_reputation": "GREEN",
+      "sold_quantity": 1000
+    },
+    {
+      "id": "FIXTURE-GAMEPAD-001",
+      "title": "Controle Xbox Simulado",
+      "terms": [
+        "controle xbox"
+      ],
+      "price": 19900,
+      "original_price": 29900,
+      "url": "https://example.com/radar/gamepad-001",
+      "currency_id": "BRL",
+      "free_shipping": true
+    },
+    {
+      "id": "FIXTURE-SETUP-001",
+      "title": "Fita LED para Setup",
+      "terms": [
+        "setup"
+      ],
+      "price": 3900,
+      "original_price": 6900,
+      "url": "https://example.com/radar/setup-001",
+      "currency_id": "BRL",
+      "free_shipping": false
+    },
+    {
+      "id": "FIXTURE-MOUSE-NEGATIVE",
+      "title": "Adesivos para Mouse Gamer",
+      "terms": [
+        "mouse gamer"
+      ],
+      "price": 990,
+      "original_price": 1990,
+      "url": "https://example.com/radar/mouse-negative",
+      "currency_id": "BRL",
+      "free_shipping": true
+    }
+  ]
+}
