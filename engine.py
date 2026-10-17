@@ -235,7 +235,7 @@ class OfferEngine:
                     evaluation.decision = "não seria publicada: " + reason
                     logger.info("Oferta %s retida: %s.", product.external_id, reason)
                     continue
-                text = format_offer(product, result)
+                text = format_offer(product, result, public_channel_url=self.config.public_channel_url)
                 if not self.config.auto_publish or product.source == "fixture":
                     simulated += 1
                     evaluation.decision = "SERIA PUBLICADA (simulação registrada)"
@@ -266,7 +266,8 @@ class OfferEngine:
                 logger.info("Fim de busca (%s): %d analisados, %d aprovados, %d publicados, %d simulados.",
                             state, analyzed, approved, published, simulated)
                 if not self.config.auto_publish:
-                    self.reporter(format_dry_run_report(report, self.config.min_offer_score))
+                    self.reporter(format_dry_run_report(report, self.config.min_offer_score,
+                                                        public_channel_url=self.config.public_channel_url))
                 if reply_chat_id is not None:
                     try:
                         self.telegram.reply(reply_chat_id, format_search_summary(

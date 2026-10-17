@@ -7,7 +7,7 @@ import time
 from dataclasses import replace
 
 from admin_bot import AdminBot
-from config import DEFAULT_TERMS, Config, ConfigError, load_config, parse_item_ids
+from config import DEFAULT_TERMS, Config, ConfigError, load_config, load_public_channel_url, parse_item_ids
 from database import Database
 from engine import OfferEngine
 from models import timestamp, utcnow
@@ -148,7 +148,7 @@ def _item_ids(value: str) -> tuple[str, ...]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Radar Tech: busca de ofertas e painel privado no Telegram.")
     parser.add_argument("--dry-run", action="store_true", help="força simulação mesmo se AUTO_PUBLISH=true")
-    parser.add_argument("--fixture", action="store_true", help="simulação local com fixtures, sem .env, rede ou Telegram; executa e encerra")
+    parser.add_argument("--fixture", action="store_true", help="simulação local com fixtures e URL pública opcional, sem credenciais, rede ou Telegram; executa e encerra")
     parser.add_argument("--once", action="store_true", help="executa um ciclo de busca, sem painel, e encerra")
     parser.add_argument("--search-now", action="store_true", help="consulta IDs configurados e filtra por 3 termos tech; força simulação, sem Telegram, e encerra")
     parser.add_argument("--search-limit", type=_search_limit, metavar="N",
@@ -169,7 +169,7 @@ def main() -> int:
     try:
         if args.fixture:
             from services.fixture_runner import run_fixture_simulation
-            report = run_fixture_simulation()
+            report = run_fixture_simulation(Config(public_channel_url=load_public_channel_url()))
             return 1 if report.status in {"failed", "partial"} else 0
         config = load_config(force_dry_run=args.dry_run or args.admin_only or args.search_now)
         if args.item_ids is not None:

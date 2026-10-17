@@ -77,12 +77,12 @@ class ScoreAndPresentationTests(IsolatedTest):
         product = replace(fixture_product(), relevance_score=0)
         self.assertFalse(score_offer(product, [29900] * 3).approved(0))
 
-    def test_formatter_complete_data_short_plain_text_and_category_icon(self):
+    def test_formatter_complete_data_short_html_and_category_icon(self):
         product = replace(fixture_product(), title="Logitech G305 Wireless", price=17990, original_price=24990,
                           rating=4.7, source="store_a")
         text = format_offer(product, ScoreResult(84, {}, True))
-        for expected in ("ACHADO RADAR TECH", "🖱️ Logitech G305 Wireless", "R$ 179,90", "28,01% OFF",
-                         "⭐ Radar Score: 84/100 — Boa oferta", "Frete grátis", "Avaliação: 4.7", "Ver oferta:"):
+        for expected in ("<b>🖱️ Logitech G305 Wireless</b>", "<s>R$ 249,90</s>", "<b>Por: R$ 179,90</b>", "28,01% OFF",
+                         "📡 Radar Score: 84/100 — Boa oferta", "Frete grátis", "Avaliação: 4.7", "Compre aqui 👉"):
             self.assertIn(expected, text)
         self.assertLess(len(text), 700)
         self.assertNotIn("ótimo custo-benefício", text)
@@ -98,7 +98,7 @@ class ScoreAndPresentationTests(IsolatedTest):
         text = format_offer(replace(fixture_product(), free_shipping=False), ScoreResult(70, {}, True))
         self.assertNotIn("Frete grátis", text)
 
-    def test_formatter_no_html_or_markdown_parse_mode_and_limits_title(self):
+    def test_formatter_escapes_html_uses_html_parse_mode_and_limits_title(self):
         product = replace(fixture_product(), title="<b>[produto]</b>\n" * 100)
         text = format_offer(product, ScoreResult(80, {}, True))
         self.assertLess(len(text), 1000)
@@ -106,8 +106,9 @@ class ScoreAndPresentationTests(IsolatedTest):
         response = Mock(status_code=200, json=Mock(return_value={"ok": True, "result": {"message_id": 1}}))
         with patch("telegram_service.requests.post", return_value=response) as post:
             telegram.publish_offer(text)
-        self.assertNotIn("parse_mode", post.call_args.kwargs["json"])
-        self.assertIn("<b>[produto]</b>", post.call_args.kwargs["json"]["text"])
+        self.assertEqual(post.call_args.kwargs["json"]["parse_mode"], "HTML")
+        self.assertIn("&lt;b&gt;[produto]&lt;/b&gt;", post.call_args.kwargs["json"]["text"])
+        self.assertNotIn("<b>[produto]</b>", post.call_args.kwargs["json"]["text"])
 
     def test_formatter_history_statement_requires_qualified_evidence(self):
         product = fixture_product()

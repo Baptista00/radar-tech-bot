@@ -7,7 +7,7 @@ CATEGORY_ICONS = {
     "mouse": "🖱️", "teclado": "⌨️", "headset": "🎧", "ssd": "💾", "ram": "💾",
     "monitor": "🖥️", "notebook": "💻", "gpu": "🎮", "cpu": "⚙️", "microfone": "🎙️",
     "webcam": "📷", "controle": "🎮", "power_bank": "🔋", "hub": "🔌",
-    "carregador": "🔌", "setup": "🛠️", "other": "📦",
+    "carregador": "🔌", "setup": "🛠️", "other": "✨",
 }
 CATEGORY_ALIASES = {"SSD": "ssd", "memória RAM": "ram", "placa de vídeo": "gpu",
                     "processador": "cpu", "power bank": "power_bank", "mousepad": "setup",

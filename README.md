@@ -10,7 +10,9 @@ Base do bot de ofertas tech com SQLite, score explicável e administração pela
 .\.venv\Scripts\python.exe main.py --dry-run --fixture
 ```
 
-Executa um ciclo e encerra, sem carregar `.env`, sem usar credenciais, sem importar a integração Mercado Livre e sem construir transporte Telegram. Usa os padrões seguros de `Config`, força `AUTO_PUBLISH=false` mesmo quando o ambiente diz `true`, lê `data/fixtures/offers.json` e grava no SQLite **`data/radartech-fixture.db`**, separado do banco real. O banco e seu lock continuam ignorados pelo Git; o JSON de cenários é versionável.
+Executa um ciclo e encerra, sem usar credenciais, sem importar a integração Mercado Livre e sem construir transporte Telegram. Usa os padrões seguros de `Config`, força `AUTO_PUBLISH=false` mesmo quando o ambiente diz `true`, lê `data/fixtures/offers.json` e grava no SQLite **`data/radartech-fixture.db`**, separado do banco real. O banco e seu lock continuam ignorados pelo Git; o JSON de cenários é versionável.
+
+Para as prévias das mensagens, a CLI consulta somente `PUBLIC_CHANNEL_URL`: primeiro no ambiente do processo e, se a variável estiver ausente, na atribuição correspondente do `.env`. As outras configurações não são carregadas, e a URL não interpola variáveis. Uma URL pública preenchida inclui o CTA de compartilhamento; valor ausente, vazio ou somente whitespace omite todo o bloco. Um valor vazio explícito no ambiente prevalece sobre o arquivo. O `.env` não é modificado.
 
 São 26 registros simulados, 25 IDs únicos `FIXTURE-*` e links `https://example.com/...`: preços bons/comuns, histórico em queda, desconto sem referência, SSD suspeito, categorias tech, produto irrelevante, repetição e campos ausentes. A saída identifica a simulação, normaliza candidatos, salva preços válidos, aplica relevância, score, categorias ativas, ranking e antispam. Preço ausente é rejeitado; item irrelevante pode alimentar histórico, mas não entra no ranking.
 
@@ -310,7 +312,7 @@ Na fonte atual de terceiros, sem histórico suficiente ou dados confiáveis de r
 
 A frase **“Menor preço observado pelo Radar nos últimos X dias do histórico local”** exige X ≥ 3, ao menos três observações anteriores e cobertura de cada dia UTC anterior dentro da janela configurada, sem lacunas. O preço atual precisa ser menor ou igual a todos os preços anteriores na janela. Observações futuras, de outro item/fonte ou do próprio instante atual não contam. Muitas coletas no mesmo dia não comprovam cobertura diária. Isso descreve apenas observações locais, nunca o mínimo de todo o mercado. Três preços anteriores permitem calcular queda, mas não comprovam uma janela de 30 dias.
 
-Postagens usam texto simples (sem `parse_mode` HTML/Markdown), título limitado, ícone da categoria, preço, desconto calculado quando válido, faixa do score e frete grátis somente quando confirmado. Campos ausentes são omitidos. Nenhuma alegação de custo-benefício, avaliação ou vendas é inventada. Mensagens de fixture identificam explicitamente dados fictícios.
+Postagens usam HTML do Telegram, texto externo escapado, título limitado com ícone da categoria, descrição curta, preço atual em negrito e preço anterior riscado somente quando válido. O percentual OFF exige referência válida; o Radar Score e o frete grátis confirmado são preservados. O CTA usa `PUBLIC_CHANNEL_URL` quando configurada, e o aviso final fica em itálico. Campos ausentes são omitidos. Nenhuma alegação de custo-benefício, avaliação ou vendas é inventada. Mensagens de fixture identificam explicitamente dados fictícios.
 
 ## Arquitetura e dados
 

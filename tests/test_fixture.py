@@ -23,6 +23,7 @@ from safety import SafeError
 from services.fixture_runner import fixture_config, run_fixture_simulation, seed_fixture_history
 from services.fixture_source import FIXTURE_PATH, FIXTURE_TERMS, FixtureSource
 from services.offer_normalizer import normalize_candidate
+from services.offer_formatter import PROMOTION_NOTICE, format_offer
 from services.offer_source import AmazonSource, MercadoLivreAdapter, OfferBatch, OfferSource, ShopeeSource
 from services.publisher import OfflinePublisher
 from telegram_service import TelegramService
@@ -175,6 +176,7 @@ class FixtureTests(IsolatedTest):
         output = io.StringIO()
         with patch("sys.argv", ["main.py", "--dry-run", "--fixture"]), \
              patch("services.fixture_runner.fixture_config", return_value=self.config), \
+             patch("main.load_public_channel_url", return_value="") as public_config, \
              patch("main.load_config", side_effect=AssertionError("Config secreta proibida")) as config, \
              patch("main.MercadoLivreSource", side_effect=AssertionError("ML proibido")) as ml, \
              patch("main.TelegramService", side_effect=AssertionError("Telegram proibido")) as telegram, \
@@ -182,12 +184,77 @@ class FixtureTests(IsolatedTest):
              patch.dict(os.environ, {"AUTO_PUBLISH": "true", "OFFER_SOURCE": "mercado_livre"}):
             self.assertEqual(main.main(), 0)
         config.assert_not_called()
+        public_config.assert_called_once_with()
         ml.assert_not_called()
         telegram.assert_not_called()
         poll.assert_not_called()
         self.assertIn("RADAR TECH — DRY RUN", output.getvalue())
         self.assertIn("TOP OFERTAS", output.getvalue())
         self.assertIn("FIXTURE", output.getvalue())
+        self.assertIn("PRÉVIAS DAS MENSAGENS", output.getvalue())
+        self.assertEqual(output.getvalue().count(PROMOTION_NOTICE), 3)
+
+    def test_fixture_previews_use_formatter_for_complete_missing_reference_and_unknown_shipping(self):
+        output = Mock()
+        base = replace(self.config, public_channel_url="https://t.me/example")
+        report = run_fixture_simulation(base, database_path=self.path, clock=lambda: NOW, reporter=output)
+        text = output.call_args.args[0]
+        self.assertEqual(text.count(PROMOTION_NOTICE), 3)
+        previews = [entry for entry in report.offers if format_offer(
+            entry.product, entry.result, public_channel_url=base.public_channel_url) in text]
+        self.assertEqual(len(previews), 3)
+        self.assertTrue(any(entry.product.original_price and entry.product.free_shipping is True for entry in previews))
+        self.assertTrue(any(entry.product.original_price is None and entry.product.free_shipping is None for entry in previews))
+        self.assertTrue(any(entry.product.original_price and entry.product.free_shipping is None for entry in previews))
+        self.assertEqual(text.count("Envie o Radar Tech pra galera"), 3)
+        self.telegram.assert_not_called()
+        self.connect.assert_not_called()
+        self.dns.assert_not_called()
+
+    def test_cli_fixture_uses_public_channel_url_and_unicode_without_publication(self):
+        output = io.StringIO()
+        with patch("sys.argv", ["main.py", "--dry-run", "--fixture"]), \
+             patch("services.fixture_runner.fixture_config", side_effect=lambda base, **kwargs: fixture_config(base, database_path=self.path)), \
+             patch("main.load_public_channel_url", return_value="https://t.me/RadarTechOfertas") as public_config, \
+             patch("main.load_config", side_effect=AssertionError("Config secreta proibida")) as config, \
+             patch("main.MercadoLivreSource", side_effect=AssertionError("ML proibido")) as ml, \
+             patch("main.TelegramService", side_effect=AssertionError("Telegram proibido")) as telegram, \
+             patch("main.poll_admin") as poll, patch("main.configure_logging"), redirect_stdout(output), \
+             patch.dict(os.environ, {"AUTO_PUBLISH": "true", "OFFER_SOURCE": "mercado_livre"}):
+            self.assertEqual(main.main(), 0)
+        text = output.getvalue()
+        self.assertEqual(text.count("Envie o Radar Tech pra galera 👇\nhttps://t.me/RadarTechOfertas"), 3)
+        for codepoints in ((0x1F525,), (0x1F4C9,), (0x1F4E1,), (0x1F447,)):
+            self.assertIn("".join(map(chr, codepoints)), text)
+        for codepoint in (0x1F4B0, 0x1F3F7, 0x2B50, 0x1F4E2):
+            self.assertNotIn(chr(codepoint), text)
+        self.assertEqual(text.count(PROMOTION_NOTICE), 3)
+        self.assertFalse(Database(self.path).get_state("auto_publish"))
+        public_config.assert_called_once_with()
+        for forbidden in (config, ml, telegram, poll, self.telegram, self.connect, self.dns):
+            forbidden.assert_not_called()
+
+    def test_engine_passes_public_cta_to_formatter_without_publishing(self):
+        config = replace(self.config, public_channel_url="https://t.me/example")
+        db = Database(self.path)
+        publisher = Mock(spec=TelegramService)
+        with patch("engine.format_offer", wraps=format_offer) as formatter:
+            engine = OfferEngine(config, db, FixtureSource(), publisher, clock=lambda: NOW, reporter=Mock())
+            engine.run_search()
+        self.assertEqual(engine.last_report.status, "completed")
+        self.assertGreater(formatter.call_count, 0)
+        for call in formatter.call_args_list:
+            self.assertEqual(call.kwargs["public_channel_url"], config.public_channel_url)
+        publisher.publish_offer.assert_not_called()
+        publisher.reply.assert_not_called()
+
+    def test_second_fixture_cycle_still_previews_messages_when_antispam_blocks_posts(self):
+        self.simulate()
+        output = Mock()
+        report = run_fixture_simulation(database_path=self.path, reporter=output, clock=lambda: NOW)
+        self.assertEqual(report.simulated, 0)
+        self.assertEqual(output.call_args.args[0].count(PROMOTION_NOTICE), 3)
+        self.telegram.assert_not_called()
 
     def test_cli_rejects_conflicting_options_before_loading_env(self):
         for option in ("--admin-only", "--search-now", "--item-ids=MLB100"):

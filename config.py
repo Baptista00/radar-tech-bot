@@ -4,11 +4,12 @@ import math
 import os
 import re
 from dataclasses import dataclass, field
+from io import StringIO
 from pathlib import Path
 from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from services.categories import CATEGORY_ICONS
 from services.offer_relevance import DEFAULT_NEGATIVE_KEYWORDS
 
@@ -56,6 +57,7 @@ class Config:
     history_days: int = 30
     post_timezone: str = "America/Sao_Paulo"
     database_path: Path = BASE_DIR / "data" / "radartech.db"
+    public_channel_url: str = ""
 
 
 def _integer(env: Mapping[str, str], name: str, default: int,
@@ -84,6 +86,31 @@ def parse_item_ids(value: str) -> tuple[str, ...]:
     if len(identities) > 50 or any(not re.fullmatch(r"MLB[0-9]{1,20}", identity) for identity in identities):
         raise ConfigError("MELI_ITEM_IDS exige até 50 IDs MLB válidos, separados por vírgulas.")
     return identities
+
+
+def load_public_channel_url(environ: Mapping[str, str] | None = None, *,
+                            dotenv_path: Path | None = None) -> str:
+    """Configuração pública do fixture; não carrega credenciais nem interpola valores.
+
+    Um mapping explícito evita leitura de arquivo, salvo se o teste informar um
+    caminho próprio. A CLI manual consulta o ambiente e depois apenas a atribuição
+    de PUBLIC_CHANNEL_URL no .env, sem importar as outras opções para o ambiente.
+    """
+    read_file = environ is None or dotenv_path is not None
+    environ = os.environ if environ is None else environ
+    if "PUBLIC_CHANNEL_URL" in environ:
+        return environ["PUBLIC_CHANNEL_URL"].strip()
+    if not read_file:
+        return ""
+    value = ""
+    try:
+        with (dotenv_path if dotenv_path is not None else BASE_DIR / ".env").open(encoding="utf-8-sig") as stream:
+            for line in stream:
+                if re.match(r"^\s*(?:export\s+)?PUBLIC_CHANNEL_URL\s*=", line):
+                    value = dotenv_values(stream=StringIO(line), interpolate=False).get("PUBLIC_CHANNEL_URL") or ""
+    except (OSError, UnicodeError):
+        return ""
+    return value.strip()
 
 
 def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool = False) -> Config:
@@ -133,6 +160,7 @@ def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool
     return Config(
         telegram_bot_token=token, telegram_chat_id=chat_id,
         telegram_admin_id=admin_id, auto_publish=mode == "true",
+        public_channel_url=environ.get("PUBLIC_CHANNEL_URL", "").strip(),
         min_offer_score=_integer(environ, "MIN_OFFER_SCORE", 70, 0, 100),
         max_posts_per_day=_integer(environ, "MAX_POSTS_PER_DAY", 12, 1, 100),
         min_minutes_between_posts=_integer(environ, "MIN_MINUTES_BETWEEN_POSTS", 30, 1, 1440),

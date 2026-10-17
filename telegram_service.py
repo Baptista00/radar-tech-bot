@@ -51,9 +51,13 @@ class TelegramService:
         raise SafeError(f"Telegram HTTP {code}: {description}.", status=code,
                         uncertain=uncertain, retry_after=retry_after)
 
-    def _send(self, chat_id: str | int, text: str) -> int:
-        result = self._call("sendMessage", {"chat_id": chat_id, "text": text,
-                                           "link_preview_options": {"is_disabled": True}}, sending=True)
+    def _send(self, chat_id: str | int, text: str, *, parse_mode: str | None = None,
+              link_preview: bool = False) -> int:
+        data = {"chat_id": chat_id, "text": text,
+                "link_preview_options": {"is_disabled": not link_preview}}
+        if parse_mode is not None:
+            data["parse_mode"] = parse_mode
+        result = self._call("sendMessage", data, sending=True)
         message_id = result.get("message_id") if isinstance(result, dict) else None
         if type(message_id) is not int or message_id <= 0:
             raise SafeError("Telegram: resposta sem ID de mensagem; entrega não confirmada.", uncertain=True)
@@ -62,7 +66,7 @@ class TelegramService:
     def publish_offer(self, text: str) -> int:
         if not self._auto_publish:
             raise SafeError("Publicação bloqueada: AUTO_PUBLISH=false.")
-        return self._send(self._channel_id, text)
+        return self._send(self._channel_id, text, parse_mode="HTML", link_preview=True)
 
     def reply(self, chat_id: int, text: str) -> int:
         return self._send(chat_id, text)
