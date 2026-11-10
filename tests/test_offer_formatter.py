@@ -214,9 +214,16 @@ class OfferFormatterTests(IsolatedTest):
             self.assertNotIn(claim, text)
 
     def test_rating_only_appears_for_valid_supplied_values(self):
-        self.assertIn("Avaliação: 4.7", self.message(rating=4.7))
+        self.assertIn("⭐ 4.7", self.message(rating=4.7))
         for rating in (None, True, "5", float("nan"), float("inf"), -1, 6):
-            self.assertNotIn("Avaliação:", self.message(rating=rating))
+            self.assertNotIn("⭐", self.message(rating=rating))
+
+    def test_sales_use_brazilian_thousand_separator(self):
+        self.assertIn("🔥 1.234 vendas", self.message(sold_quantity=1234))
+        self.assertIn("🔥 50 vendas", self.message(sold_quantity=50))
+        self.assertIn("🔥 1.234.567 vendas", self.message(sold_quantity=1234567))
+        for sold in (None, 0, True):
+            self.assertNotIn("vendas", self.message(sold_quantity=sold))
 
     def test_notice_is_always_last_with_one_blank_line_before_it(self):
         for changes in ({}, {"original_price": 29990}, {"free_shipping": True}, {"source": "fixture"}):

@@ -32,6 +32,8 @@ PROMOTION_NOTICE = "<i>Promoção sujeita a alteração a qualquer momento.</i>"
 # Códigos Unicode explícitos preservam os símbolos mesmo em edições via terminal.
 PRICE_ICON = "\U0001f525"  # fogo
 DISCOUNT_ICON = "\U0001f4c9"  # gráfico em queda
+RATING_ICON = "⭐"  # estrela
+SALES_ICON = "\U0001f525"  # fogo
 SCORE_ICON = "\U0001f4e1"  # antena de satélite
 
 
@@ -81,7 +83,9 @@ def format_offer(product: Product, result: ScoreResult, *, public_channel_url: s
     if product.free_shipping is True:
         details.append("🚚 Frete grátis")
     if type(product.rating) in {int, float} and 0 <= product.rating <= 5:
-        details.append(f"Avaliação: {product.rating:g}")
+        details.append(f"{RATING_ICON} {product.rating:g}")
+    if type(product.sold_quantity) is int and product.sold_quantity > 0:
+        details.append(f"{SALES_ICON} {product.sold_quantity:,} vendas".replace(",", "."))
     # Mantém as afirmações de histórico já sustentadas pelo pipeline, sem usá-las
     # para inventar preço anterior, desconto ou atributos na descrição curta.
     if result.history_claim_days is not None and result.history_claim_days >= 3:

@@ -67,7 +67,8 @@ class ScoreAndPresentationTests(IsolatedTest):
 
     def test_missing_reference_never_becomes_discount_or_savings(self):
         for original in (None, 19900, 19000):
-            product = replace(fixture_product(), original_price=original)
+            # Sem vendas/avaliação para isolar a ausência de referência de preço.
+            product = replace(fixture_product(), original_price=original, sold_quantity=None, rating=None)
             result = score_offer(product, [])
             self.assertNotIn("discount", result.criteria)
             self.assertFalse(result.approved(0))
@@ -82,7 +83,7 @@ class ScoreAndPresentationTests(IsolatedTest):
                           rating=4.7, source="store_a")
         text = format_offer(product, ScoreResult(84, {}, True))
         for expected in ("<b>🖱️ Logitech G305 Wireless</b>", "<s>R$ 249,90</s>", "<b>Por: R$ 179,90</b>", "28,01% OFF",
-                         "📡 Radar Score: 84/100 — Boa oferta", "Frete grátis", "Avaliação: 4.7", "Compre aqui 👉"):
+                         "📡 Radar Score: 84/100 — Boa oferta", "Frete grátis", "⭐ 4.7", "🔥 1.000 vendas", "Compre aqui 👉"):
             self.assertIn(expected, text)
         self.assertLess(len(text), 700)
         self.assertNotIn("ótimo custo-benefício", text)

@@ -32,7 +32,9 @@ def score_offer(product: Product, previous_prices: Sequence[int], *,
     if product.seller_reputation is not None:
         criteria["reputation"] = 10 if product.seller_reputation.upper() == "GREEN" else 0
     if product.sold_quantity is not None:
-        criteria["sold"] = _points(product.sold_quantity, ((1000, 10), (500, 8), (100, 6), (50, 4), (10, 2)))
+        criteria["sold"] = _points(product.sold_quantity, ((1000, 15), (500, 12), (100, 8), (50, 5), (10, 2)))
+    if product.rating is not None:
+        criteria["rating"] = _points(product.rating, ((4.5, 15), (4.0, 10), (3.5, 6), (3.0, 3)))
     if product.brand:
         criteria["brand"] = 5 if product.brand.casefold() in {brand.casefold() for brand in known_brands} else 0
     if product.relevance_score is not None:
@@ -42,7 +44,13 @@ def score_offer(product: Product, previous_prices: Sequence[int], *,
     if recently_published:
         criteria["recent_publication"] = -10
     # Não pontuar estrelas inferidas, dados restritos ou campos ausentes.
-    evidence = (discount is not None and discount > 0) or drop > 0
+    # Vendas altas ou boa avaliação também validam a oferta (ex.: Shopee sem desconto).
+    evidence = (
+        (discount is not None and discount > 0)
+        or drop > 0
+        or (product.sold_quantity is not None and product.sold_quantity >= 50)
+        or (product.rating is not None and product.rating >= 4.0)
+    )
     if product.relevance_score == 0:
         evidence = False
     return ScoreResult(min(100, max(0, round(sum(criteria.values())))), criteria, evidence)

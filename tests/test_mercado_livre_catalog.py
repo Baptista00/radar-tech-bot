@@ -304,8 +304,53 @@ class CatalogScoreTests(IsolatedTest):
         p = product(original_price=None, brand=None, sold_quantity=0, free_shipping=False, seller_reputation="RED")
         self.assertEqual(score_offer(p, []).score, 0)
         p = replace(p, sold_quantity=50, free_shipping=True, seller_reputation="GREEN")
-        self.assertEqual(score_offer(p, []).score, 24)
-        self.assertFalse(score_offer(p, []).approved(20))
+        self.assertEqual(score_offer(p, []).score, 25)
+        # 50+ vendas contam como evidência, mas o score ainda precisa do threshold.
+        self.assertTrue(score_offer(p, []).approved(20))
+        self.assertFalse(score_offer(p, []).approved(30))
+
+    def test_sold_quantity_points_follow_new_bands(self):
+        for sold, points in ((0, 0), (9, 0), (10, 2), (50, 5), (100, 8), (500, 12), (1000, 15), (99999, 15)):
+            p = product(original_price=None, brand=None, sold_quantity=sold, free_shipping=None,
+                        seller_reputation=None, rating=None)
+            self.assertEqual(score_offer(p, []).criteria["sold"], points)
+
+    def test_rating_points_follow_bands(self):
+        for rating, points in ((2.9, 0), (3.0, 3), (3.5, 6), (4.0, 10), (4.4, 10), (4.5, 15), (5, 15)):
+            p = product(original_price=None, brand=None, sold_quantity=None, free_shipping=None,
+                        seller_reputation=None, rating=rating)
+            self.assertEqual(score_offer(p, []).criteria["rating"], points)
+        p = product(original_price=None, brand=None, sold_quantity=None, free_shipping=None,
+                    seller_reputation=None, rating=None)
+        self.assertNotIn("rating", score_offer(p, []).criteria)
+
+    def test_sales_volume_is_evidence_without_discount(self):
+        base = product(original_price=None, brand=None, free_shipping=None, seller_reputation=None, rating=None)
+        self.assertFalse(score_offer(replace(base, sold_quantity=49), []).has_saving_evidence)
+        self.assertTrue(score_offer(replace(base, sold_quantity=50), []).has_saving_evidence)
+        self.assertFalse(score_offer(replace(base, sold_quantity=None), []).has_saving_evidence)
+
+    def test_good_rating_is_evidence_without_discount(self):
+        base = product(original_price=None, brand=None, free_shipping=None, seller_reputation=None, sold_quantity=None)
+        self.assertFalse(score_offer(replace(base, rating=3.9), []).has_saving_evidence)
+        self.assertTrue(score_offer(replace(base, rating=4.0), []).has_saving_evidence)
+        self.assertFalse(score_offer(replace(base, rating=None), []).has_saving_evidence)
+
+    def test_irrelevant_product_has_no_evidence_even_with_sales_and_rating(self):
+        p = product(original_price=None, sold_quantity=5000, rating=5, relevance_score=0)
+        self.assertFalse(score_offer(p, []).has_saving_evidence)
+
+    def test_typical_shopee_product_without_discount_is_approved_at_35(self):
+        # Shopee não informa frete, marca nem reputação: sem desconto, o teto é 40.
+        p = product(original_price=None, brand=None, free_shipping=None, seller_reputation=None,
+                    sold_quantity=500, rating=4.5, relevance_score=8, source="shopee")
+        result = score_offer(p, [])
+        self.assertEqual(result.criteria, {"sold": 12, "rating": 15, "relevance": 8})
+        self.assertEqual(result.score, 35)
+        self.assertTrue(result.has_saving_evidence)
+        self.assertTrue(result.approved(35))
+        best = score_offer(replace(p, sold_quantity=1000, relevance_score=10), [])
+        self.assertEqual(best.score, 40)
 
     def test_history_requires_three_previous_observations(self):
         p = product(price=6000, original_price=None)
@@ -321,12 +366,12 @@ class CatalogScoreTests(IsolatedTest):
         self.assertEqual(result.score, 5)
         self.assertFalse(result.approved(0))
 
-    def test_maximum_score_is_100_and_rating_is_not_used(self):
+    def test_maximum_score_is_100_and_rating_is_scored(self):
         p = product(rating=5, relevance_score=10)
         result = score_offer(p, [20000, 20000, 20000])
         self.assertEqual(result.score, 100)
-        self.assertNotIn("rating", result.criteria)
-        self.assertEqual(score_offer(p, []).score, 80)
+        self.assertEqual(result.criteria["rating"], 15)
+        self.assertEqual(score_offer(p, []).score, 100)
 
 
 class CatalogIntegrationTests(IsolatedTest):
