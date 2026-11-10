@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 AUTH_ERROR_CODES = {10001, 10002, 10003}
 RATE_LIMIT_CODE = 10030
+SYSTEM_ERROR_CODE = 10000
 
 PRODUCT_FIELDS = (
     "itemId productName commissionRate priceMin priceMax sales imageUrl "
@@ -88,6 +89,8 @@ class ShopeeClient:
                     pass
             if RATE_LIMIT_CODE in codes:
                 raise SafeError("Shopee: limite de requisições atingido.", status=status, retry_after=60)
+            if SYSTEM_ERROR_CODE in codes:
+                raise SafeError("Shopee: erro interno da API (10000).", status=status, retry_after=30)
             if codes & AUTH_ERROR_CODES:
                 raise SafeError("Shopee: falha de autenticação; verifique app id, secret e relógio.", status=status)
             raise SafeError("Shopee: a API retornou erro na consulta.", status=status)
@@ -96,12 +99,19 @@ class ShopeeClient:
             raise SafeError("Shopee: resposta sem dados.", status=status)
         return result
 
-    def search_products(self, keyword: str, sort_type: int = 2, limit: int = 10, page: int = 1) -> list[dict]:
+    def search_products(self, keyword: str, sort_type: int | None = None, limit: int = 10,
+                        page: int = 1) -> list[dict]:
+        """sort_type=None usa a ordem padrão da API (relevância); 2 ordena por vendas.
+
+        Na API BR, sortType=1 explícito responde 10000 (System Error); por isso a
+        relevância é obtida omitindo o parâmetro, junto com listType: 0.
+        """
         if type(limit) is not int or not 1 <= limit <= 50:
             raise SafeError("Shopee: limite deve ficar entre 1 e 50.")
+        sort = f"sortType: {int(sort_type)}, " if sort_type is not None else ""
         query = (
-            f"{{productOfferV2(keyword: {json.dumps(keyword)}, sortType: {int(sort_type)}, "
-            f"page: {int(page)}, limit: {limit}) {{nodes {{{PRODUCT_FIELDS}}} "
+            f"{{productOfferV2(listType: 0, keyword: {json.dumps(keyword)}, {sort}"
+            f"limit: {limit}, page: {int(page)}) {{nodes {{{PRODUCT_FIELDS}}} "
             f"pageInfo {{page limit hasNextPage}}}}}}"
         )
         offer = self._post(query).get("productOfferV2")
@@ -174,7 +184,7 @@ class ShopeeSource:
         )
 
     def search(self, term: str, limit: int) -> OfferBatch:
-        batch = OfferBatch(discovery="Shopee Affiliate Open API — busca por palavra-chave, ordenada por vendas.")
+        batch = OfferBatch(discovery="Shopee Affiliate Open API — busca por palavra-chave, ordenada por relevância.")
         if self._stopped():
             batch.stop = True
             return batch
