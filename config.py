@@ -53,6 +53,8 @@ class Config:
     request_interval_seconds: int = 2
     meli_request_delay_seconds: float = 1.0
     meli_item_ids: tuple[str, ...] = ()
+    shopee_app_id: str = ""
+    shopee_secret: str = field(default="", repr=False)
     negative_keywords: tuple[str, ...] = DEFAULT_NEGATIVE_KEYWORDS
     history_days: int = 30
     post_timezone: str = "America/Sao_Paulo"
@@ -126,6 +128,10 @@ def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool
         raise ConfigError("OFFER_SOURCE inválida.")
     if source == "fixture":
         mode = "false"
+    shopee_app_id = environ.get("SHOPEE_APP_ID", "").strip()
+    shopee_secret = environ.get("SHOPEE_SECRET", "").strip()
+    if source == "shopee" and (not shopee_app_id or not shopee_secret):
+        raise ConfigError("OFFER_SOURCE=shopee exige SHOPEE_APP_ID e SHOPEE_SECRET configurados.")
     categories = tuple(dict.fromkeys(part.strip() for part in environ.get(
         "ACTIVE_CATEGORIES", ",".join(CATEGORY_ICONS)).split(",") if part.strip()))
     if not categories or any(category not in CATEGORY_ICONS for category in categories):
@@ -176,6 +182,7 @@ def load_config(environ: Mapping[str, str] | None = None, *, force_dry_run: bool
         request_interval_seconds=_integer(environ, "REQUEST_INTERVAL_SECONDS", 2, 1, 60),
         meli_request_delay_seconds=_request_delay(environ),
         meli_item_ids=parse_item_ids(environ.get("MELI_ITEM_IDS", "")),
+        shopee_app_id=shopee_app_id, shopee_secret=shopee_secret,
         negative_keywords=negatives,
         history_days=_integer(environ, "HISTORY_DAYS", 30, 1, 365),
         post_timezone=timezone_name,

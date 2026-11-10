@@ -78,6 +78,7 @@ class PendingSource:
 
 
 class ShopeeSource(PendingSource):
+    """Stub offline; a implementação real está em services.shopee.ShopeeSource."""
     source_id = "shopee"
 
 

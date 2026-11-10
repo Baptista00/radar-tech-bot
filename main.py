@@ -13,7 +13,7 @@ from engine import OfferEngine
 from models import timestamp, utcnow
 from runtime_lock import instance_lock
 from safety import SafeError, configure_logging
-from services.offer_source import AmazonSource, MercadoLivreAdapter, ShopeeSource
+from services.offer_source import AmazonSource, MercadoLivreAdapter
 from telegram_service import TelegramService
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,9 @@ def make_source(config: Config):
         from services.fixture_source import FixtureSource
         return FixtureSource()
     if config.offer_source == "shopee":
-        return ShopeeSource()
+        # Import tardio: só carrega a integração quando a Shopee é a fonte ativa.
+        from services.shopee import ShopeeConfig, ShopeeSource
+        return ShopeeSource(ShopeeConfig(app_id=config.shopee_app_id, secret=config.shopee_secret))
     if config.offer_source == "amazon":
         return AmazonSource()
     if config.offer_source != "mercado_livre":
@@ -174,7 +176,7 @@ def main() -> int:
         config = load_config(force_dry_run=args.dry_run or args.admin_only or args.search_now)
         if args.item_ids is not None:
             config = replace(config, meli_item_ids=args.item_ids)
-        configure_logging((config.telegram_bot_token,))
+        configure_logging(tuple(secret for secret in (config.telegram_bot_token, config.shopee_secret) if secret))
         return run(config, once=args.once, admin_only=args.admin_only,
                    search_now=args.search_now, search_limit=args.search_limit)
     except (ConfigError, SafeError) as error:
