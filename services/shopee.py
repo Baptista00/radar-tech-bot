@@ -57,6 +57,7 @@ class ShopeeClient:
             "Content-Type": "application/json",
             "Authorization": f"SHA256 Credential={self.config.app_id}, Signature={signature}, Timestamp={timestamp}",
         }
+        logger.debug("Shopee payload: %s", json.dumps(payload, ensure_ascii=False)[:500])
         try:
             response = self.session.post(self.config.endpoint, data=body.encode("utf-8"),
                                          headers=headers, timeout=self.config.timeout)
