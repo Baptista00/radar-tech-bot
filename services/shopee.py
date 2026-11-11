@@ -169,15 +169,14 @@ class ShopeeSource:
         if item_id in (None, "") or not isinstance(title, str) or not isinstance(offer_link, str):
             return None
         price = _cents(node.get("priceMin"))
-        price_max = _cents(node.get("priceMax"))
-        original = price_max if price is not None and price_max is not None and price_max > price else None
         url = offer_link
         if node.get("offerLink") and not self._stopped():
             url = self.client.generate_short_link(offer_link) or offer_link
         sales = node.get("sales")
         return OfferCandidate(
             external_id=f"SHOPEE{item_id}", title=title, price=price, url=url,
-            source="shopee", original_price=original, rating=_float(node.get("ratingStar")),
+            source="shopee", original_price=None,  # priceMax é variação, não preço original
+            rating=_float(node.get("ratingStar")),
             sold_quantity=sales if type(sales) is int else None,
             image_url=node.get("imageUrl") or None, search_term=term,
             item_id=f"SHOPEE{item_id}", currency_id="BRL", price_source="shopee",
