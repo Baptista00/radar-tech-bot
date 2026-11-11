@@ -111,7 +111,7 @@ class ShopeeClient:
             raise SafeError("Shopee: limite deve ficar entre 1 e 50.")
         sort = f"sortType: {int(sort_type)}, " if sort_type is not None else ""
         query = (
-            f"{{productOfferV2(listType: 0, keyword: {json.dumps(keyword)}, {sort}"
+            f"query {{productOfferV2(listType: 0, keyword: {json.dumps(keyword)}, {sort}"
             f"limit: {limit}, page: {int(page)}) {{nodes {{{PRODUCT_FIELDS}}} "
             f"pageInfo {{page limit hasNextPage}}}}}}"
         )
