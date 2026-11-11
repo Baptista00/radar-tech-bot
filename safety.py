@@ -1,6 +1,7 @@
 """Erros públicos e logs sem URLs autenticadas, tokens ou tracebacks de HTTP."""
 
 import logging
+import os
 import re
 import sys
 from collections.abc import Iterable
@@ -53,6 +54,7 @@ def configure_logging(secrets: Iterable[str] = ()) -> None:
     handler = logging.StreamHandler()
     handler.addFilter(SecretFilter(secrets))
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    logging.basicConfig(level=level, handlers=[handler], force=True)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
